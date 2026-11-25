@@ -29,7 +29,7 @@ const sameAs = (tool: Record<string, unknown>, engine: Record<string, unknown>, 
 /** A CPM project P and its activities on a 10-hour calendar (days there are not the preference's 8 hours), saved as its own baseline; with lob, beside
  *  it an LOB plan TOWER that finishes later, so its activities drive the file's finish. */
 async function file(lob = true) {
-  const np = (await call('new_project', { id: 'P', start: '2026-03-02' })).d;
+  const np = (await call('new_project', { currency: 'USD', id: 'P', start: '2026-03-02' })).d;
   const h = np.handle, owner_key = np.owner_key;
   const ten = { mon: [['07:00', '12:00'], ['13:00', '18:00']], tue: [['07:00', '12:00'], ['13:00', '18:00']], wed: [['07:00', '12:00'], ['13:00', '18:00']], thu: [['07:00', '12:00'], ['13:00', '18:00']], fri: [['07:00', '12:00'], ['13:00', '18:00']] };
   const e = await call('edit', { handle: h, owner_key, operations: [
@@ -64,7 +64,7 @@ test('Crashing: the panel locks the LOB plan’s activities as crash_schedule do
   // (field_changes is the engine's input to the fields an apply writes beside each activity, a8b25c5: the tool does not answer it, and the screen does not show it)
   const { field_changes: forFields, ...shown } = screen;
   assert.ok(Array.isArray(forFields) && tool.d.field_changes === undefined);
-  sameAs(tool.d, shown, 'crash_schedule', ['exported', 'unsaved_changes']);
+  sameAs(tool.d, shown, 'crash_schedule', ['exported', 'unsaved_changes', 'currency']);   // (the file's base currency: an answer that gives costs names it)
   // (why it matters here: without the lock the engine crashes the LOB plan's activities, which the tool never does)
   const unlocked = await crashSchedule(db, all, { targetDays: 5, defaultMaxPct: 30, hoursPerDay: HPD });
   assert.ok(unlocked.ok && unlocked.ops.some((o) => /^(CS|DW)-/.test(String(o.id))), JSON.stringify(unlocked.ok && unlocked.ops).slice(0, 300));
@@ -78,7 +78,7 @@ test('What-ifs: the panel counts days on each activity’s calendar as evaluate_
   const tool = await call('evaluate_batch', { handle: h, project: 'P', scenarios });
   assert.equal(tool.err, false, JSON.stringify(tool.d).slice(0, 300));
   assert.ok(screen.ok);
-  sameAs(tool.d, screen, 'evaluate_batch', ['exported', 'parts_removed']); // (a finished batch names the kept file it removed)
+  sameAs(tool.d, screen, 'evaluate_batch', ['exported', 'parts_removed', 'currency']); // (a finished batch names the kept file it removed)
   // (why it matters here: days at the preference's 8 hours on a 10-hour calendar are other durations)
   const atPreference = await evaluateBatch(db, [cpm.proj_id], scenarios, { hoursPerDay: HPD, calendarDays: false });
   assert.ok(atPreference.ok);

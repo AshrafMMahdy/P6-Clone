@@ -14,7 +14,7 @@ testRoots();
 const call = async (name: string, args: Record<string, unknown>) => { const r = await callTool(name, args); return toolResult(r.out, r.isError, name).structuredContent as any; };
 const open = async (sample: string) => { const path = sampleCopy(sample); let o = await call('open_file', { path }); if (o.error) o = await call('open_file', { path, lenient: true }); assert.ok(o.handle, JSON.stringify(o).slice(0, 300)); return o; };
 async function built(id: string, ops: unknown[]): Promise<string> {
-  const p = await call('new_project', { id, start: '2026-01-05' });
+  const p = await call('new_project', { currency: 'USD', id, start: '2026-01-05' });
   const e = await call('edit', { handle: p.handle, operations: ops });
   assert.ok(!e.error, JSON.stringify(e).slice(0, 300));
   return p.handle;
@@ -218,7 +218,7 @@ test('dcma_14: a CPLI with no remaining critical path length says why from the a
   const reason = (d: any): string => String((d.notes as string[]).find((n) => /CPLI/.test(n) && /not assessed/.test(n)));
   const left = (proj: string, finish: string, status: string, open: string) => `Critical path length index (CPLI) not assessed: the latest finish of ${proj} (${finish}) is not after the status date (${status}) in working time of the project’s default calendar, so there is no remaining critical path to measure; ${open} not complete.`;
   const whose = (proj: string, n: number) => ` CPLI is of ${proj}, the first of ${n} projects in scope; pass project to measure another.`;
-  const made = async (id: string, more: Record<string, unknown>, ops: unknown[]) => { const p = await call('new_project', { id, start: '2026-01-05', ...more }); const e = await call('edit', { handle: p.handle, operations: ops }); assert.ok(!e.error, JSON.stringify(e).slice(0, 300)); return p.handle as string; };
+  const made = async (id: string, more: Record<string, unknown>, ops: unknown[]) => { const p = await call('new_project', { currency: 'USD', id, start: '2026-01-05', ...more }); const e = await call('edit', { handle: p.handle, operations: ops }); assert.ok(!e.error, JSON.stringify(e).slice(0, 300)); return p.handle as string; };
 
   // verify_fidelity_schedule.xer as opened: open activities whose saved dates were never calculated. From the file's own rows: how many activities
   // have no actual finish, the latest saved finish, the data date; the saved finish lies before the data date
@@ -274,7 +274,7 @@ test('dcma_14: a CPLI with no remaining critical path length says why from the a
 });
 
 test('a user defined field and a calendar are answered in the words the operations take, not the file’s codes', async () => {
-  const p = await call('new_project', { id: 'UD', start: '2026-01-05' });
+  const p = await call('new_project', { currency: 'USD', id: 'UD', start: '2026-01-05' });
   const e = await call('edit', { handle: p.handle, operations: [{ op: 'add_udf', name: 'Zone' }, { op: 'add_udf', name: 'Handover', subject: 'wbs', data_type: 'finish_date' }, { op: 'add_udf', name: 'Weight', subject: 'resource', data_type: 'number' }] });
   assert.deepEqual(e.results, [{ udf: 'Zone', subject: 'activity', data_type: 'text' }, { udf: 'Handover', subject: 'wbs', data_type: 'finish_date' }, { udf: 'Weight', subject: 'resource', data_type: 'number' }]);
   const d = await call('list_dictionaries', { handle: p.handle });
@@ -306,12 +306,12 @@ test('save and close say they need the owner key only where this server requires
   try {
     config.requireOwnerKey = false;   // a stdio server (the platform's): no key needed, a wrong one refused
     for (const t of ['save', 'close']) assert.ok(!text(t).includes('(needs owner_key)') && text(t).includes('owner_key is not required by this server'), text(t).slice(0, 160));
-    const p = await call('new_project', { id: 'OK1', start: '2026-01-05' });
+    const p = await call('new_project', { currency: 'USD', id: 'OK1', start: '2026-01-05' });
     assert.equal((await call('close', { handle: p.handle, owner_key: 'not-the-key', discard: true })).error.code, 'invalid_owner_key');
     assert.equal((await call('close', { handle: p.handle, discard: true })).closed, p.handle);
     config.requireOwnerKey = true;    // an HTTP server: the key is needed, and the description says so
     for (const t of ['save', 'close']) assert.ok(text(t).includes('(needs owner_key)'), text(t).slice(0, 160));
-    const q = await call('new_project', { id: 'OK2', start: '2026-01-05' });
+    const q = await call('new_project', { currency: 'USD', id: 'OK2', start: '2026-01-05' });
     assert.equal((await call('close', { handle: q.handle, discard: true })).error.code, 'owner_key_required');
     assert.equal((await call('close', { handle: q.handle, owner_key: q.owner_key, discard: true })).closed, q.handle);
   } finally { config.requireOwnerKey = was; }
@@ -428,7 +428,7 @@ test('a report over several projects says whose baseline columns are empty; a PD
 
 test('loops, the harder cases: two loops are one sentence; a loop in one project leaves the other judged and unburdened; a loop across two projects is said of both', async () => {
   // a file built here and saved, then relationships that close loops are written into the file itself (edit refuses to make one)
-  const p = await call('new_project', { id: 'LP', start: '2026-01-05' });
+  const p = await call('new_project', { currency: 'USD', id: 'LP', start: '2026-01-05' });
   const e = await call('edit', { handle: p.handle, operations: [
     act('A', 3), act('B', 3), act('C', 3), act('D', 3), { op: 'add_relationship', pred: 'A', succ: 'B' }, { op: 'add_relationship', pred: 'C', succ: 'D' },
     { op: 'add_project', id: 'LQ', start: '2026-01-05' }, { op: 'add_activity', project: 'LQ', id: 'X', name: 'X', duration_days: 4 }, { op: 'add_activity', project: 'LQ', id: 'Y', name: 'Y', duration_days: 4 }, { op: 'add_relationship', pred: 'X', succ: 'Y', project: 'LQ' }] });

@@ -6,6 +6,7 @@
 // itself, so undo takes them back. A field that is not in the project yet is added.
 // In a file with several projects the run number is the file's, not the project's: a project's run can skip numbers, and "WHIQ run N duration (d)" holds the
 // duration an activity had before the file's run N+1 was applied to it.
+import { formatMoney } from '../currency.ts';
 import { rows, type Db, type Row } from '../db.ts';
 import { DataError } from '../notes.ts';
 import { dayHours } from '../project/units.ts';
@@ -29,7 +30,8 @@ export function fieldChange(db: Db, task: Row, project: string | undefined, from
   const h = dayHours(db, hoursPerDay, true).task(task);
   return { task_id: task.task_id, id: task.task_code, project: project as string, from_days: r2(fromHours / h), to_days: r2(toHours / h), cost: r2(cost) };
 }
-const money = (v: number) => r2(v).toLocaleString('en-US', { maximumFractionDigits: 2 });
+/** An amount in the file's base currency (core/currency.ts): the note says the cost as the file keeps it. */
+const money = (db: Db, v: number) => formatMoney(db, v);
 
 /** The UDF data type each field needs, as add_udf names it (made as that when it does not exist), and the logical types of the file that hold it. */
 const NEEDS: Record<keyof typeof FIELDS, { type: 'number' | 'integer' | 'text'; is: RegExp }> = {
@@ -132,7 +134,7 @@ export function whiqRunOps(db: Db, o: { changes: FieldChange[]; ranks?: FieldRan
       const from = r2(c.from_days);
       if (original == null) { put.original.push({ ...at, value: from }); original = from; }
       else if (k >= 2) (runCells.get(k - 1) ?? runCells.set(k - 1, []).get(k - 1)!).push({ ...at, value: from });
-      put.note.push({ ...at, value: `${o.who} ${o.on}: ${from} d to ${r2(c.to_days)} d, cost ${money(c.cost)}${original !== from ? ` (original ${r2(original)} d)` : ''}` });
+      put.note.push({ ...at, value: `${o.who} ${o.on}: ${from} d to ${r2(c.to_days)} d, cost ${money(db, c.cost)}${original !== from ? ` (original ${r2(original)} d)` : ''}` });
     }
     const rk = rankOf.get(t.task_id);
     if (rk) put.rank.push({ ...at, value: rk.rank }); else if (o.ranks && had.rank.has(t.task_id)) dropRank.push({ ...at, value: '' });

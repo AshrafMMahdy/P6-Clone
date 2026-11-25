@@ -14,7 +14,7 @@ const caps = (db: Db, id: string) => { const rid = rows(db, 'RSRC').find((r) => 
 function build(): Db {
   const db: Db = { tables: {} };
   ok(db, [
-    { op: 'add_project', id: 'R', start: '2026-03-02' },
+    { op: 'add_project', currency: 'USD', id: 'R', start: '2026-03-02' },
     { op: 'add_resource', id: 'CREW', max_units_per_day: 8 },
     { op: 'add_resource', id: 'CRANE', type: 'nonlabor', max_units_per_hour: 2 },
     { op: 'add_activity', id: 'A', name: 'Pour A', duration_days: 5 }, { op: 'add_activity', id: 'B', name: 'Pour B', duration_days: 5 },

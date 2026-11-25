@@ -56,7 +56,7 @@ test('ratio_empirical draws as the platform\'s sampleRatio, milestones included:
   const ratios = [0.95, 1, 1.05, 1.1, 1.2, 1.3, 0.9, 1.15, 1.4, 1.02, 1.6, 0.85];
   for (const [weight, list] of [[0.66, ratios], [0.66, ratios.slice(0, 5)], [0, ratios]] as const) {
     const db: Db = { tables: {} };
-    assert.equal(applyOps(db, [{ op: 'add_project', id: 'F', start: '2026-03-02' }, ...ACTS.map((a) => ({ op: 'add_activity', id: a.id, name: a.id, ...(a.type ? { type: a.type } : { duration_days: a.d }) })),
+    assert.equal(applyOps(db, [{ op: 'add_project', currency: 'USD', id: 'F', start: '2026-03-02' }, ...ACTS.map((a) => ({ op: 'add_activity', id: a.id, name: a.id, ...(a.type ? { type: a.type } : { duration_days: a.d }) })),
       ...ACTS.flatMap((a) => a.p.map((p) => ({ op: 'add_relationship', pred: p, succ: a.id })))]).ok, true);
     const pid = rows(db, 'PROJECT')[0].proj_id;
     assert.equal(scheduleProjects(db, [pid]).ok, true);
@@ -96,7 +96,7 @@ async function deadPid(): Promise<number> { const c = spawn(process.execPath, ['
 /** A recovery folder as a server that is gone left it: owner lock, index, and one moved-out project with an edit. */
 function leftover(dir: string, pid: number, handle: string, legacy = false) {
   const db: Db = { tables: {} };
-  applyOps(db, [{ op: 'add_project', id: 'LEFT', start: '2026-03-02' }, { op: 'add_activity', id: 'L1', name: 'left behind', duration_days: 1 }]);
+  applyOps(db, [{ op: 'add_project', currency: 'USD', id: 'LEFT', start: '2026-03-02' }, { op: 'add_activity', id: 'L1', name: 'left behind', duration_days: 1 }]);
   mkdirSync(dir, { recursive: true });
   const file = join(dir, `${handle}.p6db.jsonl`);
   writeFileSync(file, [...dbLines(db, null)].join('\n') + '\n');
@@ -110,7 +110,7 @@ const files = (d: string) => (existsSync(d) ? readdirSync(d) : []);
 test('a restart brings every handle back with its unsaved edits, under its old owner key', { timeout: 60_000 }, async () => {
   const w = place('a');
   const s1 = server(w.env(), w.at('a'));
-  const x = await s1.tool('new_project', { id: 'RS', start: '2026-03-02' });
+  const x = await s1.tool('new_project', { currency: 'USD', id: 'RS', start: '2026-03-02' });
   await s1.tool('edit', { handle: x.handle, operations: [{ op: 'add_activity', id: 'A1', name: 'before the restart', duration_days: 1 }] });
   s1.p.stdin.end(); await s1.exited;
   const s2 = server(w.env(), w.at('a'));
@@ -126,7 +126,7 @@ test('a restart brings every handle back with its unsaved edits, under its old o
 test('after a crash (SIGKILL) a new server brings the handles back from the dead one\'s folder; nothing is deleted', { timeout: 60_000 }, async () => {
   const w = place('a');
   const s1 = server(w.env(), w.at('a'));
-  const x = await s1.tool('new_project', { id: 'CR', start: '2026-03-02' });
+  const x = await s1.tool('new_project', { currency: 'USD', id: 'CR', start: '2026-03-02' });
   await s1.tool('edit', { handle: x.handle, operations: [{ op: 'add_activity', id: 'C1', name: 'before the crash', duration_days: 1 }] });
   await sleep(1000); // the checkpoint (100 ms after the change)
   s1.p.kill('SIGKILL'); await s1.exited;
@@ -147,13 +147,13 @@ test('two live servers without a storage root stay isolated: one exiting never s
   const w = place('a', 'b');
   const env = w.env({ P6CLONE_MAX_HANDLES: '1' });
   const A = server(env, w.at('a')), B = server(env, w.at('b'));
-  const x = await A.tool('new_project', { id: 'XA', start: '2026-03-02' });
+  const x = await A.tool('new_project', { currency: 'USD', id: 'XA', start: '2026-03-02' });
   await A.tool('edit', { handle: x.handle, operations: [{ op: 'add_activity', id: 'A1', name: 'unsaved in A', duration_days: 1 }] });
-  await A.tool('new_project', { id: 'YA', start: '2026-03-02' }); // XA moves out (one slot)
+  await A.tool('new_project', { currency: 'USD', id: 'YA', start: '2026-03-02' }); // XA moves out (one slot)
   const moved = (await A.tool('list_open')).moved_out;
   assert.equal(moved.length, 1);
   const fileA = moved[0].recovery_file as string;
-  const z = await B.tool('new_project', { id: 'ZB', start: '2026-03-02' });
+  const z = await B.tool('new_project', { currency: 'USD', id: 'ZB', start: '2026-03-02' });
   await B.tool('edit', { handle: z.handle, operations: [{ op: 'add_activity', id: 'B1', name: 'unsaved in B', duration_days: 1 }] });
   assert.equal((await B.tool('list_open')).moved_out.length, 0, 'B does not see A\'s moved-out project');
   B.p.stdin.end(); await B.exited;
@@ -189,7 +189,7 @@ test('a dead owner\'s folder, and the shared index of servers before v0.1.15, ar
 
 test('a Microsoft Project import from before v0.1.14 (task UIDs, no source mark) keeps one relationship per pair; so does a handle opened from an .mpx file', async () => {
   const db: Db = { tables: {} };
-  assert.equal(applyOps(db, [{ op: 'add_project', id: 'M', start: '2026-03-02' }, { op: 'add_activity', id: 'A', name: 'A' }, { op: 'add_activity', id: 'B', name: 'B' }, { op: 'add_relationship', pred: 'A', succ: 'B' }]).ok, true);
+  assert.equal(applyOps(db, [{ op: 'add_project', currency: 'USD', id: 'M', start: '2026-03-02' }, { op: 'add_activity', id: 'A', name: 'A' }, { op: 'add_activity', id: 'B', name: 'B' }, { op: 'add_relationship', pred: 'A', succ: 'B' }]).ok, true);
   const t = rows(db, 'TASK');
   assert.equal(checkRelationship(db, t[0].task_id, t[1].task_id, 'PR_SS'), undefined, 'a P6 project: per type');
   for (const [i, x] of t.entries()) x._msp_uid = String(i + 1); // as an MPX read before v0.1.14 left it
@@ -198,7 +198,7 @@ test('a Microsoft Project import from before v0.1.14 (task UIDs, no source mark)
   // MCP: an .mpx file opened now
   const { writeMpx } = await import('../core/msp/mpx.ts');
   const clean: Db = { tables: {} };
-  applyOps(clean, [{ op: 'add_project', id: 'M2', start: '2026-03-02' }, { op: 'add_activity', id: 'A', name: 'A', duration_days: 1 }, { op: 'add_activity', id: 'B', name: 'B', duration_days: 1 }, { op: 'add_relationship', pred: 'A', succ: 'B' }]);
+  applyOps(clean, [{ op: 'add_project', currency: 'USD', id: 'M2', start: '2026-03-02' }, { op: 'add_activity', id: 'A', name: 'A', duration_days: 1 }, { op: 'add_activity', id: 'B', name: 'B', duration_days: 1 }, { op: 'add_relationship', pred: 'A', succ: 'B' }]);
   const path = join(mkdtempSync(join(tmpdir(), 'p6mpx-')), 'm.mpx');
   writeFileSync(path, writeMpx(clean));
   const call = async (name: string, a: Record<string, unknown>) => toolResult((await callTool(name, a)).out, false).structuredContent as any;
@@ -218,7 +218,7 @@ test('a Microsoft Project import from before v0.1.14 (task UIDs, no source mark)
 
 test('copy_project of a project from Microsoft Project is a P6 project: its mark says so, so one relationship per pair and type, whatever its UIDs', () => {
   const db: Db = { tables: {} };
-  assert.equal(applyOps(db, [{ op: 'add_project', id: 'MS', start: '2026-03-02' }, { op: 'add_activity', id: 'A', name: 'A' }, { op: 'add_activity', id: 'B', name: 'B' }, { op: 'add_relationship', pred: 'A', succ: 'B' }]).ok, true);
+  assert.equal(applyOps(db, [{ op: 'add_project', currency: 'USD', id: 'MS', start: '2026-03-02' }, { op: 'add_activity', id: 'A', name: 'A' }, { op: 'add_activity', id: 'B', name: 'B' }, { op: 'add_relationship', pred: 'A', succ: 'B' }]).ok, true);
   rows(db, 'PROJECT')[0]._msp_source = 'Y';
   for (const [i, t] of rows(db, 'TASK').entries()) t._msp_uid = String(i + 1);
   assert.equal(applyOps(db, [{ op: 'copy_project', from: 'MS', id: 'P6COPY' }]).ok, true);

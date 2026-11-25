@@ -40,7 +40,7 @@ test('MCP HTTP: token, origin, sessions as callers, owner keys, root, per-caller
     assert.equal((await s.post({ jsonrpc: '2.0', id: 1, method: 'ping' }, { origin: 'https://evil.example' })).status, 403);
 
     const alice = await s.session(), bob = await s.session();
-    const { data: np } = await alice('new_project', { id: 'H1', start: '2026-03-02' });
+    const { data: np } = await alice('new_project', { currency: 'USD', id: 'H1', start: '2026-03-02' });
     const h = np.handle, key = np.owner_key;
     assert.match(h, /^h_/); assert.match(key, /^ok_/);
 
@@ -117,9 +117,9 @@ test('MCP HTTP: at the handle limit the idlest project is moved to a recovery fi
   const s = await server(root, { P6CLONE_MAX_HANDLES: '1' });
   try {
     const a = await s.session();
-    const p1 = (await a('new_project', { id: 'E1', start: '2026-03-02' })).data;
+    const p1 = (await a('new_project', { currency: 'USD', id: 'E1', start: '2026-03-02' })).data;
     await a('edit', { handle: p1.handle, operations: [{ op: 'add_activity', id: 'X1', name: 'Kept', duration_days: 3 }] });
-    const p2 = (await a('new_project', { id: 'E2', start: '2026-03-02' })).data;
+    const p2 = (await a('new_project', { currency: 'USD', id: 'E2', start: '2026-03-02' })).data;
     assert.ok(p2.handle, JSON.stringify(p2));
     const lo = (await a('list_open')).data;
     assert.equal(lo.moved_out.length, 1);

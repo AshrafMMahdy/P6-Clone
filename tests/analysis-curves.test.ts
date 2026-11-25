@@ -12,7 +12,7 @@ const sum = (xs: (number | null)[]) => Math.round(xs.reduce<number>((a, x) => a 
 function build(): Db {
   const db: Db = { tables: {} };
   ok(db, [
-    { op: 'add_project', id: 'C', start: '2026-03-02' },
+    { op: 'add_project', currency: 'USD', id: 'C', start: '2026-03-02' },
     { op: 'add_resource', id: 'LAB', units_per_day: 8, max_units_per_day: 8, price_per_unit: 10 },
     { op: 'add_activity', id: 'A', name: 'Dig', duration_days: 10 }, { op: 'add_activity', id: 'B', name: 'Pour', duration_days: 10 }, { op: 'add_activity', id: 'P', name: 'Parallel', duration_days: 10 },
     { op: 'add_relationship', pred: 'A', succ: 'B' },
@@ -88,7 +88,7 @@ test('a baseline saved in the file but not assigned (Tower-A: no sum_base_proj_i
   // an activity whose actual start and finish are after the data date: its EV is still counted by the data date
   const db: Db = { tables: {} };
   const r = applyOps(db, [
-    { op: 'add_project', id: 'EV', start: '2026-03-02' }, { op: 'add_resource', id: 'R', name: 'R', price_per_unit: 10 },
+    { op: 'add_project', currency: 'USD', id: 'EV', start: '2026-03-02' }, { op: 'add_resource', id: 'R', name: 'R', price_per_unit: 10 },
     { op: 'add_activity', id: 'A', name: 'A', duration_days: 5 }, { op: 'assign_resource', activity: 'A', resource: 'R', units_per_day: 8 },
     { op: 'update_activity', id: 'A', actual_start: '2026-03-20 08:00', actual_finish: '2026-03-26 17:00' },
   ]);

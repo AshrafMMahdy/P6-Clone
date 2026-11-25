@@ -18,7 +18,7 @@ test('maxOf, minOf and pushAll over a million values (a spread of this size over
 
 test('DCMA-14 on 160,000 activities finishes (past 150,000 it failed with "Maximum call stack size exceeded")', { timeout: 600_000 }, () => {
   const db: Db = { tables: {} };
-  const r = applyOps(db, [{ op: 'add_project', id: 'BIG', start: '2026-03-02' }, { op: 'add_activity', id: 'A0', name: 'Activity 0', duration_days: 5 }, { op: 'add_activity', id: 'A1', name: 'Activity 1', duration_days: 5 }, { op: 'add_relationship', pred: 'A0', succ: 'A1' }]);
+  const r = applyOps(db, [{ op: 'add_project', currency: 'USD', id: 'BIG', start: '2026-03-02' }, { op: 'add_activity', id: 'A0', name: 'Activity 0', duration_days: 5 }, { op: 'add_activity', id: 'A1', name: 'Activity 1', duration_days: 5 }, { op: 'add_relationship', pred: 'A0', succ: 'A1' }]);
   assert.ok(r.ok, JSON.stringify(r.error));
   const T = db.tables.TASK, base = T.rows[1];
   let id = Math.max(...T.rows.map((t) => Number(t.task_id))) + 1;

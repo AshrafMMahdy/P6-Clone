@@ -15,7 +15,7 @@ function update(name: string, dd: string, progress: unknown[] = []): Update {
   const db: Db = { tables: {} };
   const ok = (ops: unknown[]) => { const r = applyOps(db, ops, { calendarDays: true }); assert.ok(r.ok, JSON.stringify(r.error)); };
   ok([
-    { op: 'add_project', id: 'DLY', start: '2026-03-02' },
+    { op: 'add_project', currency: 'USD', id: 'DLY', start: '2026-03-02' },
     { op: 'add_activity', id: 'S', name: 'Start', type: 'start_milestone' },
     { op: 'add_activity', id: 'A', name: 'Excavation', duration_days: 5 },
     { op: 'add_activity', id: 'B', name: 'Foundations', duration_days: 5 },
@@ -99,7 +99,7 @@ test('compare computed: two updates with different project IDs match by Activity
 test('MCP windows_analysis (baseline and progress updates), tia with keep, compare against a baseline', async () => {
   const { callTool, toolResult } = await import('../mcp/server.ts');
   const call = async (name: string, args: Record<string, unknown>) => { const r = await callTool(name, args); return { err: r.isError, d: toolResult(r.out, r.isError).structuredContent as any }; };
-  const np = (await call('new_project', { id: 'WIN', start: '2026-03-02' })).d;
+  const np = (await call('new_project', { currency: 'USD', id: 'WIN', start: '2026-03-02' })).d;
   const h = np.handle, owner_key = np.owner_key;
   const e = await call('edit', { handle: h, owner_key, operations: [
     { op: 'add_activity', id: 'A', name: 'Excavation', duration_days: 5 }, { op: 'add_activity', id: 'B', name: 'Foundations', duration_days: 5 },

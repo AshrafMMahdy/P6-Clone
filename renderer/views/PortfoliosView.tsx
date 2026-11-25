@@ -1,5 +1,6 @@
 // Portfolios window: portfolio list + definition (selected projects or filter rule) on the left,
 // portfolio dashboard (one row per project with schedule/cost/earned-value metrics) and a project span chart on the right.
+import { formatMoney } from '../../core/currency.ts';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Split } from '../components/Layout.tsx';
 import { getDb, mutate, toast, useStore, type Prefs } from '../store.ts';
@@ -13,8 +14,7 @@ import {
 } from '../../core/portfolio.ts';
 
 const ALL = '*';
-const USD = new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }); // one formatter (creating one per cell is slow)
-const money = (n: number) => USD.format(n);
+const money = (n: number) => formatMoney(getDb(), n);   // the open file's base currency (core/currency.ts)
 const ratio = (n: number) => (n ? n.toFixed(2) : '');
 
 function edit(label: string, fn: (db: Db) => void): boolean {

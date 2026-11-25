@@ -23,7 +23,7 @@ const good = (db: Db, ops: unknown[]) => { const r = applyOps(db, ops as never, 
 
 /** A project `id` with activities A..E of 10, 8, 6, 5, 4 days, scheduled. */
 function plan(id = 'R', codes = ['A', 'B', 'C', 'D', 'E'], db: Db = { tables: {} }, start = '2026-06-01') {
-  good(db, [{ op: 'add_project', id, start }, ...codes.map((c, i) => ({ op: 'add_activity', project: id, id: c, name: c, duration_days: [10, 8, 6, 5, 4][i] }))]);
+  good(db, [{ op: 'add_project', currency: 'USD', id, start }, ...codes.map((c, i) => ({ op: 'add_activity', project: id, id: c, name: c, duration_days: [10, 8, 6, 5, 4][i] }))]);
   assert.ok(scheduleProjects(db, [rows(db, 'PROJECT').find((p) => p.proj_short_name === id)!.proj_id]).ok);
   return db;
 }
@@ -53,7 +53,7 @@ test('first apply: the four fields, no numbered field, an original only on each 
   assert.deepEqual(labels(db), [NOTE, CHANGE, RANK, ORIGINAL].sort());
   assert.deepEqual(['A', 'B', 'C', 'D'].map((c) => val(db, c, ORIGINAL)), ['10', undefined, '6', undefined]);
   assert.deepEqual(['A', 'B', 'C', 'D'].map((c) => val(db, c, CHANGE)), ['-4', undefined, '-3', undefined]);
-  assert.match(val(db, 'A', NOTE)!, /^Crashed by the schedule reasoner \d{4}-\d{2}-\d{2}: 10 d to 6 d, cost 5$/);
+  assert.match(val(db, 'A', NOTE)!, /^Crashed by the schedule reasoner \d{4}-\d{2}-\d{2}: 10 d to 6 d, cost \$5\.00$/);
   assert.deepEqual(['A', 'B', 'C'].map((c) => val(db, c, RANK)), ['1', '2', '3']);
 });
 
@@ -65,8 +65,8 @@ test('second apply is run 2: it declares WHIQ run 1 duration (d), holding the nu
   assert.deepEqual(['A', 'B', 'C'].map((c) => val(db, c, runField(1))), ['6', undefined, undefined], 'only A: B was not changed by run 2 (empty cell), C is changed for the first time');
   assert.deepEqual(['A', 'B', 'C'].map((c) => val(db, c, ORIGINAL)), ['10', '8', '6'], 'the original never changes once set; C gets its original now');
   assert.deepEqual(['A', 'B', 'C'].map((c) => val(db, c, CHANGE)), ['-7', '-1', '-2'], 'B is not touched by run 2 and keeps its change');
-  assert.match(val(db, 'A', NOTE)!, /: 6 d to 3 d, cost 5 \(original 10 d\)$/);
-  assert.match(val(db, 'B', NOTE)!, /: 8 d to 7 d, cost 5$/, 'an activity the latest run does not change keeps its note');
+  assert.match(val(db, 'A', NOTE)!, /: 6 d to 3 d, cost \$5\.00 \(original 10 d\)$/);
+  assert.match(val(db, 'B', NOTE)!, /: 8 d to 7 d, cost \$5\.00$/, 'an activity the latest run does not change keeps its note');
   assert.equal(daysOf(db, 'R', 'B'), 7, 'and its duration');
   assert.deepEqual(w.find((f) => f.name === runField(1)), { name: runField(1), activities: 1, kept_from_earlier: 0 });
 });
@@ -150,7 +150,7 @@ test('reasoner, crash, reasoner: original 10, run 1 = 8 (what the crash replaced
   apply(db, { A: 4 });                      // run 3 (reasoner): replaces 6 -> run 2 column
   assert.deepEqual([ORIGINAL, runField(1), runField(2), CHANGE].map((l) => cell(db, 'A', l)), ['10', '8', '6', '-6']);
   assert.equal(daysOf(db, 'R', 'A'), 4);
-  assert.match(cell(db, 'A', NOTE)!, /: 6 d to 4 d, cost 5 \(original 10 d\)$/);
+  assert.match(cell(db, 'A', NOTE)!, /: 6 d to 4 d, cost \$5\.00 \(original 10 d\)$/);
 });
 
 test('crash first, then the reasoner: the crash is run 1 (original 10, no numbered field), the reasoner is run 2 and puts the 8 the crash gave into run 1', () => {
@@ -194,7 +194,7 @@ test('crash on a schedule in progress: for an activity under way the number it r
   const write = (changes: ReturnType<typeof list>[]) => { for (const c of changes) taskOf(db, 'R', c.id).remain_drtn_hr_cnt = String(c.to_days * 8); return writeWhiqFields(db, { changes, who: 'Crashed (least cost)' }, { calendarDays: true, projIds: [projId(db, 'R')] }); };
   write([list('A', 5, 3), list('B', 3, 3 - 1)]);
   assert.deepEqual([ORIGINAL, CHANGE].map((l) => cell(db, 'A', l)), ['5', '-2'], 'the original is the remaining duration it had');
-  assert.match(cell(db, 'A', NOTE)!, /: 5 d to 3 d, cost 5$/);
+  assert.match(cell(db, 'A', NOTE)!, /: 5 d to 3 d, cost \$5\.00$/);
   // B keeps its values while progress moves its remaining duration; a later crash of A moves A's 3 into run 1 and leaves B's change as written
   rem('B', 8);
   write([list('A', 3, 2)]);
@@ -257,7 +257,7 @@ const { setRoots } = await import('../mcp/runtime.ts');
 setRoots(null, tmpdir());
 const call = async (name: string, args: Record<string, unknown>) => { const r = await callTool(name, args); return { err: r.isError, d: toolResult(r.out, r.isError).structuredContent as any }; };
 async function mcpProject(id: string, extra: unknown[] = [], direct?: (db: Db) => void) {
-  const np = (await call('new_project', { id, start: '2026-06-01' })).d;
+  const np = (await call('new_project', { currency: 'USD', id, start: '2026-06-01' })).d;
   const ops: unknown[] = [{ op: 'add_resource', id: 'civil', name: 'Civil', max_units_per_hour: 20 }];
   for (const [c, d] of [['A', 10], ['B', 5], ['C', 6]] as const) ops.push({ op: 'add_activity', id: c, name: `Activity ${c}`, duration_days: d }, { op: 'assign_resource', activity: c, resource: 'civil', units_per_day: 16 });
   ops.push({ op: 'add_relationship', pred: 'A', succ: 'B' }, ...extra);

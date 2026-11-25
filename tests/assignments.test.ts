@@ -14,7 +14,7 @@ const fail = (db: Db, ops: unknown[]) => { const r = applyOps(db, ops, { calenda
 function build(): Db {
   const db = { tables: {} } as Db;
   ok(db, [
-    { op: 'add_project', id: 'P', start: '2026-01-05' },
+    { op: 'add_project', currency: 'USD', id: 'P', start: '2026-01-05' },
     { op: 'add_resource', id: 'LAB', price_per_unit: 10 }, { op: 'add_role', id: 'ENG', name: 'Engineer' },
     { op: 'add_activity', id: 'A', name: 'Pour', duration_days: 10 },
     { op: 'assign_resource', activity: 'A', resource: 'LAB', units: 40 },
@@ -87,7 +87,7 @@ test('Excel: duplicates, role assignments and indicator UDFs round-trip; edits r
 
 test('review fixes: Excel deletes the flagged duplicates, not their neighbours; delete one and add one of a pair; a role assignment keeps its role', async () => {
   const db = { tables: {} } as Db;
-  ok(db, [{ op: 'add_project', id: 'P', start: '2026-01-05' }, { op: 'add_resource', id: 'LAB' }, { op: 'add_activity', id: 'A', name: 'Pour', duration_days: 10 },
+  ok(db, [{ op: 'add_project', currency: 'USD', id: 'P', start: '2026-01-05' }, { op: 'add_resource', id: 'LAB' }, { op: 'add_activity', id: 'A', name: 'Pour', duration_days: 10 },
     ...[10, 20, 30].map((u) => ({ op: 'assign_resource', activity: 'A', resource: 'LAB', units: u, allow_duplicate: true }))]);
   const pid = rows(db, 'PROJECT')[0].proj_id;
   const sheets = async () => readXlsx(await writeXlsx(exportSheets(db, [pid], 8, false, { columns: { TASKRSRC: ['*'] } })));
@@ -109,7 +109,7 @@ test('Excel: a refused added assignment does not refuse the later rows of its pa
   // A has LAB once and role ENG once; the sheet adds LAB three more times and ENG twice. The first added row of each pair
   // is refused (an actual finish with no actual start): it alone is refused, the rows after it are added as they are
   const db = { tables: {} } as Db;
-  ok(db, [{ op: 'add_project', id: 'P', start: '2026-01-05' }, { op: 'add_resource', id: 'LAB', price_per_unit: 10 }, { op: 'add_role', id: 'ENG', name: 'Engineer' },
+  ok(db, [{ op: 'add_project', currency: 'USD', id: 'P', start: '2026-01-05' }, { op: 'add_resource', id: 'LAB', price_per_unit: 10 }, { op: 'add_role', id: 'ENG', name: 'Engineer' },
     { op: 'add_activity', id: 'A', name: 'Pour', duration_days: 10 }, { op: 'assign_resource', activity: 'A', resource: 'LAB', units: 40 }, { op: 'assign_role', activity: 'A', role: 'ENG', units: 8 },
     { op: 'add_udf', name: 'Crew', subject: 'assignment' }]);
   const pid = rows(db, 'PROJECT')[0].proj_id;

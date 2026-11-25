@@ -104,7 +104,7 @@ test('link_activities: a chain in start order, existing links skipped, one undo;
 test('select across projects: the op\'s project limits link and renumber; set_predecessors still finds links in other projects; empty exclude refused', () => {
   const db = { tables: {} } as Db;
   ok(db, [
-    { op: 'add_project', id: 'P1', start: '2026-01-05' }, { op: 'add_project', id: 'P2', start: '2026-01-05' },
+    { op: 'add_project', currency: 'USD', id: 'P1', start: '2026-01-05' }, { op: 'add_project', currency: 'USD', id: 'P2', start: '2026-01-05' },
     ...['P1', 'P2'].flatMap((p) => [{ op: 'add_wbs', project: p, code: 'W' }, { op: 'add_activity', project: p, wbs: 'W', id: 'A1', name: 'a1' }, { op: 'add_activity', project: p, wbs: 'W', id: 'A2', name: 'a2' }]),
     { op: 'add_activity', project: 'P2', id: 'X9', name: 'x9' },
   ]);

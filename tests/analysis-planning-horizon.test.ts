@@ -130,7 +130,7 @@ test('calendar days for the windows, working days for float and drift (Monday to
   // WK starts Monday 2 March 2026. A: 5 days from the start (forecast finish Fri 6 Mar 17:00), planned finish Fri 27 Feb 17:00 = a week earlier: 7 calendar days, 5 working days.
   // B: starts Thursday 2 April = 31 calendar days after the anchor (22 working days): the 31-60 window, not the first.
   const db = { tables: {} } as B.Built['db'];
-  const ok = applyOps(db, [{ op: 'add_project', id: 'WK', start: '2026-03-02' }, { op: 'add_activity', id: 'A', name: 'A', duration_days: 5 },
+  const ok = applyOps(db, [{ op: 'add_project', currency: 'USD', id: 'WK', start: '2026-03-02' }, { op: 'add_activity', id: 'A', name: 'A', duration_days: 5 },
     { op: 'add_activity', id: 'B', name: 'B', duration_days: 3, constraint: { type: 'start_on_or_after', date: '2026-04-02 08:00' } }], { calendarDays: true });
   assert.ok(ok.ok, JSON.stringify(ok.error));
   const pid = rows(db, 'PROJECT').find((p) => !p._baseline_of)!.proj_id;

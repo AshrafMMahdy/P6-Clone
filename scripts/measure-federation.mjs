@@ -48,7 +48,7 @@ const sampler = setInterval(sample, 2000);
 await rpc('initialize', { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'measure', version: '1' } });
 child.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n');
 const t0 = Date.now();
-const p = video ? await call('new_project', { id: 'FED', start: '2026-03-02' }) : null;
+const p = video ? await call('new_project', { id: 'FED', start: '2026-03-02', currency: 'EUR' }) : null;
 const H = p ? { handle: p.handle, owner_key: p.owner_key } : {};
 const o = await call('open_model', { ...H, path: model });
 const open = { seconds: Math.round((Date.now() - t0) / 1000), server_peak_mb: peak() };

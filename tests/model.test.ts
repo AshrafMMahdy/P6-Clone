@@ -11,7 +11,7 @@ const prefs = { hoursPerDay: 8, dateFormat: 'dd-MMM-yy' as const, showTime: fals
 
 test('new project from scratch schedules and exports a valid XER', () => {
   const db = emptyDb();
-  const pid = newProject(db, { id: 'DEMO', name: 'Demo Project', start: '2024-01-08 08:00' });
+  const pid = newProject(db, { currency: 'USD', id: 'DEMO', name: 'Demo Project', start: '2024-01-08 08:00' });
   const root = db.tables.PROJWBS.rows[0].wbs_id;
   const a = addActivity(db, pid, root), b = addActivity(db, pid, root);
   assert.equal(a.task_code, 'A1000');
@@ -47,7 +47,7 @@ test('formatting and column getters', () => {
   assert.equal(fmtDate('2014-08-16 08:00', prefs), '16-Aug-14');
   assert.equal(fmtDur('40', prefs), '5');
   const db = emptyDb();
-  const pid = newProject(db, { id: 'X', name: 'X', start: '2024-01-08 08:00' });
+  const pid = newProject(db, { currency: 'USD', id: 'X', name: 'X', start: '2024-01-08 08:00' });
   const t = addActivity(db, pid, db.tables.PROJWBS.rows[0].wbs_id);
   t.act_start_date = '2024-01-08 08:00';
   const ctx = makeCtx(db, prefs);
@@ -63,7 +63,7 @@ test('user filters and database columns (activity codes, UDFs)', async () => {
   const { table } = await import('../core/db.ts');
   const db = emptyDb();
   setColumnDb(() => db);
-  const pid = newProject(db, { id: 'F', name: 'Filters', start: '2024-01-08 08:00' });
+  const pid = newProject(db, { currency: 'USD', id: 'F', name: 'Filters', start: '2024-01-08 08:00' });
   const root = db.tables.PROJWBS.rows[0].wbs_id;
   const [a, b, c] = [addActivity(db, pid, root), addActivity(db, pid, root), addActivity(db, pid, root)];
   a.target_drtn_hr_cnt = a.remain_drtn_hr_cnt = '16'; b.target_drtn_hr_cnt = b.remain_drtn_hr_cnt = '80'; c.task_name = 'Pour slab';
@@ -93,7 +93,7 @@ test('trace logic walks levels and marks driving links', async () => {
   const { traceLogic } = await import('../core/project/ctx.ts');
   const { relationshipFloat } = await import('../core/schedule/cpm.ts');
   const db = emptyDb();
-  const pid = newProject(db, { id: 'TR', name: 'Trace', start: '2024-01-08 08:00' });
+  const pid = newProject(db, { currency: 'USD', id: 'TR', name: 'Trace', start: '2024-01-08 08:00' });
   const root = db.tables.PROJWBS.rows[0].wbs_id;
   const [a, b, c, d, e] = [0, 1, 2, 3, 4].map(() => addActivity(db, pid, root));
   b.target_drtn_hr_cnt = b.remain_drtn_hr_cnt = '16'; // shorter, so B -> C is not driving
@@ -111,7 +111,7 @@ test('trace logic walks levels and marks driving links', async () => {
 
 test('Actual and At Completion Duration are working time from the actual start (P6), not Original minus Remaining', () => {
   const db = emptyDb();
-  const pid = newProject(db, { id: 'AD', name: 'Actual durations', start: '2024-01-08 08:00' });
+  const pid = newProject(db, { currency: 'USD', id: 'AD', name: 'Actual durations', start: '2024-01-08 08:00' });
   const root = db.tables.PROJWBS.rows[0].wbs_id;
   const done = addActivity(db, pid, root), going = addActivity(db, pid, root), idle = addActivity(db, pid, root);
   for (const t of [done, going, idle]) t.target_drtn_hr_cnt = t.remain_drtn_hr_cnt = '40';
@@ -126,7 +126,7 @@ test('Actual and At Completion Duration are working time from the actual start (
 
 test('table edits: Activity ID is trimmed before the duplicate check; a new primary constraint gets a date', () => {
   const db = emptyDb();
-  const pid = newProject(db, { id: 'TE', name: 'Table edits', start: '2024-01-08 08:00' });
+  const pid = newProject(db, { currency: 'USD', id: 'TE', name: 'Table edits', start: '2024-01-08 08:00' });
   const root = db.tables.PROJWBS.rows[0].wbs_id;
   const a = addActivity(db, pid, root), b = addActivity(db, pid, root);
   const ctx = makeCtx(db, prefs), set = (id: string, t: typeof a, v: string) => COLUMN_BY_ID.get(id)!.edit!.set(db, t, v, ctx);

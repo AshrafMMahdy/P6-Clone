@@ -21,7 +21,7 @@ const call = async (name: string, args: Record<string, unknown>) => {
   return { err: r.isError, d: toolResult(r.out, r.isError).structuredContent as any };
 };
 const build = async (id: string, ops: unknown[]) => {
-  const np = (await call('new_project', { id, start: '2026-03-02' })).d;
+  const np = (await call('new_project', { currency: 'USD', id, start: '2026-03-02' })).d;
   const e = await call('edit', { handle: np.handle, owner_key: np.owner_key, operations: ops });
   assert.equal(e.err, false, JSON.stringify(e.d).slice(0, 300));
   await call('schedule', { handle: np.handle, owner_key: np.owner_key });

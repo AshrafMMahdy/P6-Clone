@@ -11,6 +11,7 @@ import { readRaw } from '../renderer/io.ts';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { SAMPLES_DIR } from './helpers.ts';
+const MON_FRI = Object.fromEntries(['mon', 'tue', 'wed', 'thu', 'fri'].map((d) => [d, [['08:00', '12:00'], ['13:00', '17:00']]]));   // (a calendar's week is given: add_calendar assumes none)
 
 const ok = (db: Db, ops: unknown[], o: OpsOptions = {}) => { const r = applyOps(db, ops, o); assert.ok(r.ok, JSON.stringify(r.error)); return r.results; };
 const bad = (db: Db, ops: unknown[], re: RegExp) => { const r = applyOps(db, ops); assert.equal(r.ok, false); assert.match(r.error!.message, re); };
@@ -18,7 +19,7 @@ const bad = (db: Db, ops: unknown[], re: RegExp) => { const r = applyOps(db, ops
 function base(): Db {
   const db: Db = { tables: {} };
   ok(db, [
-    { op: 'add_project', id: 'P1', start: '2026-03-02' },
+    { op: 'add_project', currency: 'USD', id: 'P1', start: '2026-03-02' },
     { op: 'add_wbs', code: 'A' }, { op: 'add_wbs', code: 'B' }, { op: 'add_wbs', code: 'A1', parent: 'A' },
     { op: 'add_activity', id: 'T1', name: 'One', wbs: 'A1', duration_days: 5 },
     { op: 'add_resource', id: 'LAB', units_per_day: 8 },
@@ -132,7 +133,7 @@ test('ops: EPS, OBS, roles, calendar changes, assignment curve; XER keeps codes,
     { op: 'set_project', eps: 'ROADS' },
     { op: 'add_obs', name: 'PMO' }, { op: 'add_obs', name: 'Site', parent: 'PMO' }, { op: 'update_obs', name: 'Site', new_name: 'Site Team' },
     { op: 'add_role', id: 'ENG', name: 'Engineer' }, { op: 'update_role', id: 'ENG', name: 'Site Engineer' },
-    { op: 'add_calendar', name: 'Six Day' },
+    { op: 'add_calendar', name: 'Six Day', work_week: MON_FRI },
     { op: 'update_calendar', name: 'Six Day', new_name: '6-Day', work_week: { sat: [['08:00', '12:00'], ['13:00', '17:00']] }, holidays: ['2026-03-20'] },
     { op: 'update_assignment', activity: 'T1', resource: 'LAB', units: 60 },
     { op: 'add_code_type', name: 'Phase', values: [{ code: 'DES' }] }, { op: 'assign_code', activity: 'T1', type: 'Phase', value: 'DES' },
@@ -153,7 +154,7 @@ test('ops: EPS, OBS, roles, calendar changes, assignment curve; XER keeps codes,
 test('ops: a full WBS path wins over a short name it shares with a child (1 and 1.1, the normal P6 shape)', () => {
   const db: Db = { tables: {} };
   ok(db, [
-    { op: 'add_project', id: 'P2', start: '2026-03-02' },
+    { op: 'add_project', currency: 'USD', id: 'P2', start: '2026-03-02' },
     { op: 'add_wbs', code: '1', name: 'Sub' }, { op: 'add_wbs', code: '1', name: 'Piling', parent: '1' }, { op: 'add_wbs', code: '2', name: 'Super' },
     { op: 'add_wbs', code: '1', name: 'Bored', parent: '1.1' },
     { op: 'add_activity', id: 'T1', name: 'Top', wbs: '1', duration_days: 1 },
@@ -168,7 +169,7 @@ test('ops: a full WBS path wins over a short name it shares with a child (1 and 
 
 test('xer: a saved project carries no EPS table (P6 keeps the EPS in its database), and validates without findings', async () => {
   const db: Db = { tables: {} };
-  ok(db, [{ op: 'add_project', id: 'P3', start: '2026-03-02' }, { op: 'add_eps', id: 'CIV', name: 'Civil' }, { op: 'set_project', eps: 'CIV' }, { op: 'add_activity', id: 'T1', name: 'One', duration_days: 2 }]);
+  ok(db, [{ op: 'add_project', currency: 'USD', id: 'P3', start: '2026-03-02' }, { op: 'add_eps', id: 'CIV', name: 'Civil' }, { op: 'set_project', eps: 'CIV' }, { op: 'add_activity', id: 'T1', name: 'One', duration_days: 2 }]);
   const out = writeXer(db, { version: '19.12' });
   const text = new TextDecoder().decode(out);
   assert.ok(!/^%T\tEPS/m.test(text));
@@ -243,7 +244,7 @@ test('ops: resource curves (21 buckets totalling 100) on assign_resource and upd
 
 test('ops: WBS elements addressed by wbs_id (returned by add_wbs); siblings with one code are refused as in P6', () => {
   const db = base();
-  ok(db, [{ op: 'add_project', id: 'P2', start: '2026-03-02' }]);
+  ok(db, [{ op: 'add_project', currency: 'USD', id: 'P2', start: '2026-03-02' }]);
   const [x, y] = ok(db, [{ op: 'add_wbs', project: 'P1', code: 'L1', parent: 'A' }, { op: 'add_wbs', project: 'P1', code: 'L1', parent: 'B' }]) as { wbs: string; wbs_id: string }[];
   bad(db, [{ op: 'add_wbs', project: 'P1', code: 'L1', parent: 'A' }], /WBS "L1" already exists there/);
   assert.ok(x.wbs_id && y.wbs_id && x.wbs_id !== y.wbs_id);

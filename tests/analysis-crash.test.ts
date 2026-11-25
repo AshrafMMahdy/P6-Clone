@@ -16,7 +16,7 @@ setRoots(null, tmpdir());
 function net(): { db: Db; pid: string } {
   const db: Db = { tables: {} };
   const r = applyOps(db, [
-    { op: 'add_project', id: 'CR', start: '2026-03-02' },
+    { op: 'add_project', currency: 'USD', id: 'CR', start: '2026-03-02' },
     { op: 'add_activity', id: 'S', name: 'Start', type: 'start_milestone' },
     { op: 'add_activity', id: 'A', name: 'A', duration_days: 10 },
     { op: 'add_activity', id: 'B', name: 'B', duration_days: 6 },
@@ -161,7 +161,7 @@ test('crash: an LOE ending at the finish does not block; LDs need a contract dat
 test('MCP: long analyses report progress, stay cancellable and keep the server answering', async () => {
   const { callTool, toolResult } = await import('../mcp/server.ts');
   const call = async (name: string, args: Record<string, unknown>) => { const r = await callTool(name, args); return { err: r.isError, d: toolResult(r.out, r.isError).structuredContent as any }; };
-  const np = (await call('new_project', { id: 'LONG', start: '2026-03-02' })).d;
+  const np = (await call('new_project', { currency: 'USD', id: 'LONG', start: '2026-03-02' })).d;
   const ops: unknown[] = [];
   for (let i = 0; i < 60; i++) ops.push({ op: 'add_activity', id: `A${i}`, name: `A${i}`, duration_days: 3 }, ...(i ? [{ op: 'add_relationship', pred: `A${i - 1}`, succ: `A${i}` }] : []));
   await call('edit', { handle: np.handle, owner_key: np.owner_key, operations: ops });
@@ -197,7 +197,7 @@ test('shutdown mid-crash: the trial durations are put back before anything is sa
 test('platform review 2: crash ops name the project (replayable in a multi-project file); default crashing on JWM keeps going', async () => {
   const { callTool, toolResult } = await import('../mcp/server.ts');
   const call = async (name: string, args: Record<string, unknown>) => { const r = await callTool(name, args); return { err: r.isError, d: toolResult(r.out, r.isError).structuredContent as any }; };
-  const np = (await call('new_project', { id: 'N1', start: '2026-03-02' })).d;
+  const np = (await call('new_project', { currency: 'USD', id: 'N1', start: '2026-03-02' })).d;
   const h = np.handle, owner_key = np.owner_key;
   await call('edit', { handle: h, owner_key, operations: [{ op: 'add_activity', id: 'A', name: 'A', duration_days: 10 }, { op: 'add_activity', id: 'B', name: 'B', duration_days: 5 }, { op: 'add_relationship', pred: 'A', succ: 'B' }] });
   await call('schedule', { handle: h, owner_key });
@@ -219,7 +219,7 @@ test('platform review 2: crash ops name the project (replayable in a multi-proje
 
 test('crash: with no max_steps it runs to its natural end (past 100 steps); a max_steps given still stops it with CAP', async () => {
   const db: Db = { tables: {} };
-  const ops: any[] = [{ op: 'add_project', id: 'LG', start: '2026-03-02' }];
+  const ops: any[] = [{ op: 'add_project', currency: 'USD', id: 'LG', start: '2026-03-02' }];
   const n = 130;
   for (let i = 0; i < n; i++) { ops.push({ op: 'add_activity', id: `L${i}`, name: `L${i}`, duration_days: 10 }); if (i) ops.push({ op: 'add_relationship', pred: `L${i - 1}`, succ: `L${i}` }); }
   assert.ok(applyOps(db, ops, { calendarDays: true }).ok);
@@ -243,7 +243,7 @@ test('crash: with no max_steps it runs to its natural end (past 100 steps); a ma
 /** A chain of n activities of 10 days: with no crash data every one may lose 3 days, one step each. */
 const chain = (n: number) => {
   const db: Db = { tables: {} };
-  const ops: any[] = [{ op: 'add_project', id: 'CH', start: '2026-03-02' }];
+  const ops: any[] = [{ op: 'add_project', currency: 'USD', id: 'CH', start: '2026-03-02' }];
   for (let i = 0; i < n; i++) { ops.push({ op: 'add_activity', id: `L${i}`, name: `L${i}`, duration_days: 10 }); if (i) ops.push({ op: 'add_relationship', pred: `L${i - 1}`, succ: `L${i}` }); }
   assert.ok(applyOps(db, ops, { calendarDays: true }).ok);
   const pid = rows(db, 'PROJECT')[0].proj_id;
@@ -285,7 +285,7 @@ test('crash: a cancellation between steps answers the steps done (CANCELLED, par
 test('MCP crash_schedule: cancelled mid-crashing it answers the steps done, applies nothing even with apply: true, and max_steps is a whole number', async () => {
   const { callTool, toolResult } = await import('../mcp/server.ts');
   const call = async (name: string, args: Record<string, unknown>, signal?: AbortSignal, progress?: (d: number, t: number, m: string) => void) => { const r = await callTool(name, args, undefined, signal, progress); return { err: r.isError, d: toolResult(r.out, r.isError).structuredContent as any }; };
-  const np = (await call('new_project', { id: 'CRC', start: '2026-03-02' })).d;
+  const np = (await call('new_project', { currency: 'USD', id: 'CRC', start: '2026-03-02' })).d;
   const { ops } = chain(150);
   const e = await call('edit', { handle: np.handle, owner_key: np.owner_key, operations: ops.slice(1).map((o: any) => ({ ...o })) });
   assert.equal(e.err, false, JSON.stringify(e.d).slice(0, 300));
@@ -318,7 +318,7 @@ test('MCP crash_schedule: cancelled mid-crashing it answers the steps done, appl
 test('MCP crash_schedule: a cancel that lands after the last step applies nothing and answers CANCELLED; a cancelled crash job is cancelled, not done', async () => {
   const { callTool, toolResult } = await import('../mcp/server.ts');
   const call = async (name: string, args: Record<string, unknown>, signal?: AbortSignal) => { const r = await callTool(name, args, undefined, signal); return { err: r.isError, d: toolResult(r.out, r.isError).structuredContent as any }; };
-  const np = (await call('new_project', { id: 'CRL', start: '2026-03-02' })).d;
+  const np = (await call('new_project', { currency: 'USD', id: 'CRL', start: '2026-03-02' })).d;
   const { ops } = chain(6);
   assert.equal((await call('edit', { handle: np.handle, owner_key: np.owner_key, operations: ops.slice(1) })).err, false);
   await call('schedule', { handle: np.handle, owner_key: np.owner_key });
@@ -342,7 +342,7 @@ test('MCP crash_schedule: a cancel that lands after the last step applies nothin
   } finally { (globalThis as any).setImmediate = real; delete process.env.P6CLONE_COMPUTE_WORKERS; }
   assert.equal((await call('get_activity', { handle: np.handle, activity_id: 'L0' })).d.orig_days, 10, 'the project is not changed');
   // as a job: cancelled part-way with steps done, the job reads cancelled
-  const big = (await call('new_project', { id: 'CRJ', start: '2026-03-02' })).d;
+  const big = (await call('new_project', { currency: 'USD', id: 'CRJ', start: '2026-03-02' })).d;
   assert.equal((await call('edit', { handle: big.handle, owner_key: big.owner_key, operations: chain(150).ops.slice(1) })).err, false);
   await call('schedule', { handle: big.handle, owner_key: big.owner_key });
   const job = (await call('crash_schedule', { handle: big.handle, target_days: 450, async: true })).d.job_id;

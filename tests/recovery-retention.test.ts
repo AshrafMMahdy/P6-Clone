@@ -22,7 +22,7 @@ const closed = () => { const d = join(rt.recoveryDir(), 'closed'); return exists
 
 /** A new project with an edit, checkpointed (as the server does 2 s after a change); saved to `save` if given. */
 async function project(id: string, save?: string) {
-  const h = (await call('new_project', { id, start: '2026-03-02' })).handle;
+  const h = (await call('new_project', { currency: 'USD', id, start: '2026-03-02' })).handle;
   await call('edit', { handle: h, operations: [{ op: 'add_activity', id: 'A1', name: 'one', duration_days: 1 }] });
   rt.checkpoint(rt.sessions.get(h)!);
   if (save) assert.equal((await call('save', { handle: h, path: save })).saved, save);
@@ -94,7 +94,7 @@ test('an adopted folder goes once every project in it was taken out; one still h
     const ev: Record<string, unknown> = {};
     for (const h of handles) {
       const db = { tables: {} } as any;
-      applyOps(db, [{ op: 'add_project', id: h.toUpperCase(), start: '2026-03-02' }, { op: 'add_activity', id: 'L1', name: 'left', duration_days: 1 }]);
+      applyOps(db, [{ op: 'add_project', currency: 'USD', id: h.toUpperCase(), start: '2026-03-02' }, { op: 'add_activity', id: 'L1', name: 'left', duration_days: 1 }]);
       const file = join(dir, `${h}.p6db.jsonl`);
       writeFileSync(file, [...dbLines(db, null)].join('\n') + '\n');
       ev[h] = { file, ownerKey: 'k', path: null, format: 'xer', hpd: 8, at: Date.now(), reason: 'memory', dirty: true };

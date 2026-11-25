@@ -32,7 +32,7 @@ const size = (b: number[]) => [b[3] - b[0], b[4] - b[1], b[5] - b[2]].map((x) =>
 
 test('a file that states the wrong unit, read by the caller’s: the sizes, the volume, the labels, the answer; the row keeps it; the delivered IFC states it', { timeout: 600_000 }, async () => {
   const ifc = boxIfc('metres.ifc');
-  const np = (await call('new_project', { id: 'LU', start: '2027-01-04' })).d, h = np.handle, owner_key = np.owner_key;
+  const np = (await call('new_project', { currency: 'USD', id: 'LU', start: '2027-01-04' })).d, h = np.handle, owner_key = np.owner_key;
   await call('edit', { handle: h, owner_key, operations: [{ op: 'add_activity', id: 'D1', name: 'Doors', duration_days: 5 }] });
   // as the file says: metres, a box two kilometres long
   const plain = await call('open_model', { handle: h, owner_key, path: ifc });
@@ -98,7 +98,7 @@ test('a file that states no unit (no unit assignment, or one without a length): 
     { path: orphan, unit: 'mm', plain: 'm (assumed: the file states no unit)', text: 'mm (given by the caller; the file states no unit)', units: ['mm', 'm²', 'm³'] },
   ];
   for (const { path, unit, plain, text, units } of cases) {
-    const np = (await call('new_project', { id: 'NU', start: '2027-01-04' })).d, h = np.handle, owner_key = np.owner_key;
+    const np = (await call('new_project', { currency: 'USD', id: 'NU', start: '2027-01-04' })).d, h = np.handle, owner_key = np.owner_key;
     await call('edit', { handle: h, owner_key, operations: [{ op: 'add_activity', id: 'D1', name: 'Doors', duration_days: 5 }] });
     const p0 = (await call('open_model', { handle: h, owner_key, path })).d;
     assert.equal(p0.length_unit, plain, path);

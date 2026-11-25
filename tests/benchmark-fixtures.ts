@@ -23,7 +23,7 @@ export interface Source { id: string; name?: string; duration_days: number; pred
 export function project(id: string, tasks: Source[], o: { start?: string; dataDate?: string; ops?: Op[]; schedule?: boolean; allowLoops?: boolean; resources?: { id: string; max_units_per_day: number }[] } = {}): Built {
   const db: Db = { tables: {} };
   const start = o.start ?? '2026-01-05';
-  const ops: Op[] = [{ op: 'add_calendar', ...CAL }, { op: 'add_project', id, start, calendar: 'D7' }];
+  const ops: Op[] = [{ op: 'add_calendar', ...CAL }, { op: 'add_project', currency: 'USD', id, start, calendar: 'D7' }];
   for (const r of o.resources ?? []) ops.push({ op: 'add_resource', id: r.id, max_units_per_day: r.max_units_per_day, units_per_day: 1 });
   for (const t of tasks) ops.push({ op: 'add_activity', id: t.id, name: t.name ?? t.id, calendar: 'D7', ...(t.task_type === 'milestone' ? { type: 'finish_milestone' } : t.task_type === 'start_milestone' ? { type: 'start_milestone' } : { duration_days: t.duration_days }), ...(t.constraint ? { constraint: t.constraint } : {}) });
   for (const t of tasks) for (const p of t.predecessors ?? []) {

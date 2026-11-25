@@ -39,7 +39,7 @@ const runIn = (input: string, ...a: string[]) => spawnSync(process.execPath, [CL
 
 test('new + edit builds and schedules a project from scratch; the result is a valid XER', () => {
   const d = tmp(), v0 = join(d, 'v0.xer'), v1 = join(d, 'v1.xer');
-  assert.equal(run('new', '--id', 'T1', '--name', 'Test', '--start', '2026-03-02', '--out', v0).status, 0);
+  assert.equal(run('new', '--currency', 'USD', '--id', 'T1', '--name', 'Test', '--start', '2026-03-02', '--out', v0).status, 0);
   const ops = JSON.stringify([
     { op: 'add_wbs', code: 'A', name: 'Area A' },
     { op: 'add_activity', id: 'A10', name: 'Start', type: 'start_milestone', wbs: 'A' },
@@ -63,7 +63,7 @@ test('new + edit builds and schedules a project from scratch; the result is a va
 
 test('edit is one transaction: a failing operation changes nothing and is named', () => {
   const d = tmp(), v0 = join(d, 'v0.xer'), out = join(d, 'out.xer');
-  run('new', '--id', 'T2', '--start', '2026-03-02', '--out', v0);
+  run('new', '--currency', 'USD', '--id', 'T2', '--start', '2026-03-02', '--out', v0);
   const r = runIn(JSON.stringify([{ op: 'add_activity', id: 'B1', name: 'ok' }, { op: 'add_relationship', pred: 'B1', succ: 'NOPE' }]), 'edit', v0, '--ops', '-', '--out', out, '--json');
   assert.equal(r.status, 65);
   const j = JSON.parse(r.stdout);
@@ -122,7 +122,7 @@ test('edit operations refuse codes P6 does not have and keep P6 rules (milestone
   const db = emptyDb();
   const ok = (ops: unknown[]) => { const r = applyOps(db, ops); assert.equal(r.ok, true, r.error?.message ?? ''); };
   const err = (ops: unknown[]): string => applyOps(db, ops).error?.message ?? '';
-  ok([{ op: 'add_project', id: 'P', start: '2026-03-02' }, { op: 'add_activity', project: 'P', id: 'A1', name: 'a', duration_days: 5 }, { op: 'add_activity', project: 'P', id: 'A2', name: 'b', duration_days: 2 },
+  ok([{ op: 'add_project', currency: 'USD', id: 'P', start: '2026-03-02' }, { op: 'add_activity', project: 'P', id: 'A1', name: 'a', duration_days: 5 }, { op: 'add_activity', project: 'P', id: 'A2', name: 'b', duration_days: 2 },
     { op: 'add_relationship', project: 'P', pred: 'A1', succ: 'A2' }]);
   // a project read from Microsoft Project: a second relationship between the same pair (any type) is skipped with a warning
   const msp = structuredClone(db);
@@ -182,7 +182,7 @@ test('the operations guide given to the AI assistant covers every operation, and
   // a small schedule built only from what the guide says
   const db = emptyDb();
   const r = applyOps(db, [
-    { op: 'add_project', id: 'B5', name: 'Five-story building', start: '2026-11-02' },
+    { op: 'add_project', currency: 'USD', id: 'B5', name: 'Five-story building', start: '2026-11-02' },
     { op: 'add_calendar', name: '6-day', work_week: { mon: [['07:00', '15:00']], tue: [['07:00', '15:00']], wed: [['07:00', '15:00']], thu: [['07:00', '15:00']], fri: [['07:00', '15:00']], sat: [['07:00', '15:00']], sun: [] }, holidays: ['2026-12-25'] },
     { op: 'add_wbs', code: 'SUB', name: 'Substructure' }, { op: 'add_wbs', code: 'L1', name: 'Level 1', parent: 'SUB' },
     { op: 'add_activity', id: 'M0', name: 'Start', type: 'start_milestone', wbs: 'SUB' },
@@ -245,7 +245,7 @@ test('delete_wbs removes a whole floor and keeps the chain closed across it; dis
     { op: 'add_relationship', pred: `F${n}0`, succ: `F${n}1`, type: 'SS', lag_days: 2 }, { op: 'add_relationship', pred: `F${n}1`, succ: `F${n}2` },
     ...(n > 1 ? [{ op: 'add_relationship', pred: `F${n - 1}2`, succ: `F${n}0`, lag_days: 1 }] : []),
   ];
-  const r = applyOps(db, [{ op: 'add_project', id: 'T', start: '2027-03-01' }, ...floor(1), ...floor(2), ...floor(3)]);
+  const r = applyOps(db, [{ op: 'add_project', currency: 'USD', id: 'T', start: '2027-03-01' }, ...floor(1), ...floor(2), ...floor(3)]);
   assert.equal(r.ok, true, r.error?.message ?? '');
   const d = applyOps(db, [{ op: 'delete_wbs', code: 'L2' }]);
   assert.equal(d.ok, true, d.error?.message ?? '');

@@ -114,7 +114,7 @@ test('N-37-6: a 2021 Revit export (hyperlink parameters 0x4f, scaled placements 
 
 test('push 2: a reservation for work needs memory, not a project slot (with every slot taken, no project moves out)', async () => {
   const { config, reserveMemory } = await import('../mcp/runtime.ts');
-  const a = (await call('new_project', { id: 'SLOTA', start: '2026-03-02' })).d, b = (await call('new_project', { id: 'SLOTB', start: '2026-03-02' })).d;
+  const a = (await call('new_project', { currency: 'USD', id: 'SLOTA', start: '2026-03-02' })).d, b = (await call('new_project', { currency: 'USD', id: 'SLOTB', start: '2026-03-02' })).d;
   const max = config.maxHandles;
   config.maxHandles = sessions.size;
   try { reserveMemory(1048576, 'a small piece of work')(); } finally { config.maxHandles = max; }
@@ -142,7 +142,7 @@ test('N-37-1: every 4D export of an .rvt model carries the IFC4 it was made into
 });
 
 test('activity_table of: assignments / codes pages every resource and code assignment', async () => {
-  const p = (await call('new_project', { id: 'PG', start: '2026-03-02' })).d, H = { handle: p.handle, owner_key: p.owner_key };
+  const p = (await call('new_project', { currency: 'USD', id: 'PG', start: '2026-03-02' })).d, H = { handle: p.handle, owner_key: p.owner_key };
   const ops: any[] = [{ op: 'add_resource', id: 'CREW', name: 'Crew' }, { op: 'add_code_type', name: 'Zone' }, { op: 'add_code_value', type: 'Zone', code: 'N', name: 'North' }];
   for (let i = 1; i <= 5; i++) ops.push({ op: 'add_activity', id: `A${i}`, name: `A${i}`, duration_days: 2 }, { op: 'assign_resource', activity: `A${i}`, resource: 'CREW', units: 8 * i }, { op: 'assign_code', activity: `A${i}`, type: 'Zone', value: 'N' });
   assert.equal((await call('edit', { ...H, operations: ops })).err, false);
@@ -185,13 +185,13 @@ test('a project busy with a long call is checkpointed; one with a change in prog
   const files = (h: string) => { const out: string[] = []; const walk = (d: string) => { for (const e of readdirSync(d, { withFileTypes: true })) { if (e.isDirectory()) walk(join(d, e.name)); else if (e.name.startsWith(h)) out.push(e.name); } }; walk(join(tmpdir(), '.p6clone-recovery')); return out; };
   const was = config.checkpointMs; config.checkpointMs = 30;
   try {
-    const p = (await call('new_project', { id: 'CKB', start: '2026-03-02' })).d;
+    const p = (await call('new_project', { currency: 'USD', id: 'CKB', start: '2026-03-02' })).d;
     await exclusive(p.handle, async () => { // a long call holds the project
       scheduleCheckpoint(p.handle);
       await new Promise((r) => setTimeout(r, 200));
       assert.ok(files(p.handle).length, 'checkpointed while busy');
     });
-    const q = (await call('new_project', { id: 'CKC', start: '2026-03-02' })).d;
+    const q = (await call('new_project', { currency: 'USD', id: 'CKC', start: '2026-03-02' })).d;
     await changeAsync(sessions.get(q.handle)!, 'test', 'slow change', async () => {
       scheduleCheckpoint(q.handle);
       await new Promise((r) => setTimeout(r, 200));

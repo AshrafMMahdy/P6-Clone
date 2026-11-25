@@ -171,7 +171,7 @@ test('6: the IFC index runs in a worker of its own: a stuck one ends only that c
   const restore = env({ ...SHORT, P6CLONE_MODEL_CACHE: mkdtempSync(join(tmpdir(), 'p6-review-cache-')) });
   try {
     // another handle with unsaved edits
-    const np = (await call('new_project', { id: 'KEEP', start: '2026-03-02' })).d;
+    const np = (await call('new_project', { currency: 'USD', id: 'KEEP', start: '2026-03-02' })).d;
     const ed = await call('edit', { handle: np.handle, owner_key: np.owner_key, operations: [{ op: 'add_activity', id: 'A1', name: 'Unsaved work', duration_days: 5 }] });
     assert.equal(ed.err, false, JSON.stringify(ed.d).slice(0, 200));
     // a healthy but slow index worker (ticking for 1.5 s, then the real one), while the server's own loop is blocked for 2 s by "another handle's long synchronous step"
@@ -221,7 +221,7 @@ test('6: import_4d reads the file in a worker of its own: a stuck reader ends on
   const csv = join(stuckDir, 'timeliner.csv'); writeFileSync(csv, 'Name,Planned Start,Planned End\nA,2026-03-02,2026-03-06\n');
   const restore = env({ ...SHORT, P6CLONE_READ4D_WORKER: stuck });
   try {
-    const np = (await call('new_project', { id: 'R4D', start: '2026-03-02' })).d;
+    const np = (await call('new_project', { currency: 'USD', id: 'R4D', start: '2026-03-02' })).d;
     const r = await call('import_4d', { handle: np.handle, owner_key: np.owner_key, path: csv });
     assert.equal(r.err, true, JSON.stringify(r.d).slice(0, 300));
     const err = r.d.error ?? r.d;
@@ -231,7 +231,7 @@ test('6: import_4d reads the file in a worker of its own: a stuck reader ends on
     await call('close', { handle: np.handle, owner_key: np.owner_key, discard: true });
   } finally { restore(); }
   // the real worker reads it
-  const ok = await call('new_project', { id: 'R4D2', start: '2026-03-02' });
+  const ok = await call('new_project', { currency: 'USD', id: 'R4D2', start: '2026-03-02' });
   const imp = await call('import_4d', { handle: ok.d.handle, owner_key: ok.d.owner_key, path: csv, link: false });
   assert.equal(imp.err, false, JSON.stringify(imp.d).slice(0, 300));
   await call('close', { handle: ok.d.handle, owner_key: ok.d.owner_key, discard: true });

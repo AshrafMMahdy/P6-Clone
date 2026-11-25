@@ -10,6 +10,7 @@ import { parseXer } from '../core/xer/parse.ts';
 import { writeXer } from '../core/xer/write.ts';
 import { validateXer } from '../core/xer/validate.ts';
 import { SAMPLES_DIR } from './helpers.ts';
+const MON_FRI = Object.fromEntries(['mon', 'tue', 'wed', 'thu', 'fri'].map((d) => [d, [['08:00', '12:00'], ['13:00', '17:00']]]));   // (a calendar's week is given: add_calendar assumes none)
 
 const ok = (db: Db, ops: unknown[]) => { const r = applyOps(db, ops); assert.ok(r.ok, JSON.stringify(r.error)); return r.results as any[]; };
 const bad = (db: Db, ops: unknown[], re: RegExp) => { const r = applyOps(db, ops); assert.equal(r.ok, false); assert.match(r.error!.message, re); };
@@ -64,7 +65,7 @@ test('dictionary deletes: code type, UDF, cost account, calendar (refused while 
     { op: 'add_code_type', name: 'Zone', values: [{ code: 'Z1' }, { code: 'Z2' }] }, { op: 'assign_code', type: 'Zone', value: 'Z1', activity: t0 },
     { op: 'add_udf', name: 'Risk note' }, { op: 'set_udf', udf: 'Risk note', value: 'x', activity: t0 },
     { op: 'add_cost_account', id: 'CA1' }, { op: 'add_cost_account', id: 'CA2', parent: 'CA1' }, { op: 'add_expense', activity: t0, name: 'Hire', account: 'CA1', budgeted_cost: 10 },
-    { op: 'add_calendar', name: 'Night' }, { op: 'update_activity', id: t0, calendar: 'Night' },
+    { op: 'add_calendar', name: 'Night', work_week: MON_FRI }, { op: 'update_activity', id: t0, calendar: 'Night' },
     { op: 'add_resource_curve', name: 'Front', values: [10, ...Array(20).fill(4.5)] },
   ]);
   ok(db, [{ op: 'delete_code_type', name: 'Zone' }, { op: 'delete_udf', udf: 'Risk note' }, { op: 'delete_cost_account', id: 'CA1' }, { op: 'delete_resource_curve', name: 'Front' }]);
@@ -83,7 +84,7 @@ test('dictionary deletes: code type, UDF, cost account, calendar (refused while 
 test('move_activity and copy_activities between projects, with what belongs to them and the logic among the copies', () => {
   const db = load();
   const P = rows(db, 'PROJECT')[0];
-  ok(db, [{ op: 'add_project', id: 'NEW', start: '2010-07-01' }]);
+  ok(db, [{ op: 'add_project', currency: 'USD', id: 'NEW', start: '2010-07-01' }]);
   const N = rows(db, 'PROJECT').find((p) => p.proj_short_name === 'NEW')!;
   const links = rows(db, 'TASKPRED').filter((r) => r.proj_id === P.proj_id && r.pred_proj_id === P.proj_id);
   const [l] = links;

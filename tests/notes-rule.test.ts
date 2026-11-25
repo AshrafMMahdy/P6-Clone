@@ -148,7 +148,7 @@ for (const sample of ['130 TRIAL.xer', 'Tower-A.xer', 'Enppi.xer', 'Detailed Pro
 }
 
 test('the contract of the notes holds for the answers on a built project, and each tool says a condition once, in the one wording', async () => {
-  const p = await call('new_project', { id: 'B', start: '2026-03-02' });
+  const p = await call('new_project', { currency: 'USD', id: 'B', start: '2026-03-02' });
   const e = await call('edit', { handle: p.handle, operations: [
     { op: 'add_resource', id: 'LIM', max_units_per_day: 8 }, { op: 'add_resource', id: 'FREE' },
     { op: 'add_activity', id: 'A', name: 'A', duration_days: 5 }, { op: 'add_activity', id: 'B', name: 'B', duration_days: 4 }, { op: 'add_activity', id: 'C', name: 'C', duration_days: 3 },
@@ -169,7 +169,7 @@ test('the contract of the notes holds for the answers on a built project, and ea
 /** The edge cases of the data date, the loop, the stale dates and the baseline: built, and every tool's answer walked. */
 test('the contract of the notes holds on the built edge cases: no data date, no planned start, an assumed data date, a loop, a stale schedule, an unassigned baseline', async () => {
   const mk = async (id: string, ops: unknown[] = []) => {
-    const p = await call('new_project', { id, start: '2026-03-02' });
+    const p = await call('new_project', { currency: 'USD', id, start: '2026-03-02' });
     const e = await call('edit', { handle: p.handle, operations: [{ op: 'add_activity', id: 'A', name: 'A', duration_days: 5 }, { op: 'add_activity', id: 'B', name: 'B', duration_days: 4 }, { op: 'add_relationship', pred: 'A', succ: 'B' }, ...ops] });
     assert.ok(!e.error, JSON.stringify(e));
     return p.handle as string;

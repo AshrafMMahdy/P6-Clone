@@ -26,7 +26,7 @@ const env = (vars: Record<string, string | undefined>) => {
   return () => { for (const [k, v] of Object.entries(was)) { if (v == null) delete process.env[k]; else process.env[k] = v; } };
 };
 const chain = async (n: number) => {
-  const np = (await call('new_project', { id: 'PART', start: '2026-03-02' })).d;
+  const np = (await call('new_project', { currency: 'USD', id: 'PART', start: '2026-03-02' })).d;
   const ops: unknown[] = [];
   for (let i = 0; i < n; i++) ops.push({ op: 'add_activity', id: `A${i}`, name: `A${i}`, duration_days: 3 }, ...(i ? [{ op: 'add_relationship', pred: `A${i - 1}`, succ: `A${i}` }] : []));
   await call('edit', { handle: np.handle, owner_key: np.owner_key, operations: ops });
@@ -168,7 +168,7 @@ test('the job end pulse says cancelled when the job returns a partial result (no
   const c = async (name: string, args: Record<string, unknown>) => (await rpc('tools/call', { name, arguments: args })).result.structuredContent;
   try {
     await rpc('initialize', {});
-    const np = await c('new_project', { id: 'PULSE', start: '2026-03-02' });
+    const np = await c('new_project', { currency: 'USD', id: 'PULSE', start: '2026-03-02' });
     const ops: unknown[] = [];
     for (let i = 0; i < 60; i++) ops.push({ op: 'add_activity', id: `A${i}`, name: `A${i}`, duration_days: 5 }, ...(i ? [{ op: 'add_relationship', pred: `A${i - 1}`, succ: `A${i}` }] : []));
     await c('edit', { handle: np.handle, owner_key: np.owner_key, operations: ops });

@@ -12,7 +12,7 @@ setRoots(join(import.meta.dirname, '..'), mkdtempSync(join(tmpdir(), 'p6-notes-a
 const call = async (name: string, args: Record<string, unknown>) => { const r = await callTool(name, args); return toolResult(r.out, r.isError).structuredContent as any; };
 /** A project made in the clone: new_project, then the operations. */
 async function built(start: string, ops: unknown[], id = 'P'): Promise<string> {
-  const p = await call('new_project', { id, start });
+  const p = await call('new_project', { currency: 'USD', id, start });
   const e = await call('edit', { handle: p.handle, operations: ops });
   assert.ok(e.ok !== false && !e.error, JSON.stringify(e));
   return p.handle;
@@ -106,7 +106,7 @@ test('4: evaluate_batch names no best when no scenario finishes the project earl
 });
 
 test('6: monte_carlo on a project with no activities is a plain refusal naming the cause and the next step, not a server bug', async () => {
-  const p = await call('new_project', { id: 'EMPTY', start: '2026-01-05' });
+  const p = await call('new_project', { currency: 'USD', id: 'EMPTY', start: '2026-01-05' });
   const r = await call('monte_carlo', { handle: p.handle, iterations: 10 });
   assert.equal(r.error.code, 'bad_input');
   assert.equal(r.error.message, 'The project has no activities, so there is nothing to simulate.');
@@ -170,7 +170,7 @@ test('11: a resource with no limit is not judged: level_resources does not level
 });
 
 test('11: a resource added with no maximum says what limit it was given', async () => {
-  const p = await call('new_project', { id: 'RR', start: '2026-01-05' });
+  const p = await call('new_project', { currency: 'USD', id: 'RR', start: '2026-01-05' });
   const e = await call('edit', { handle: p.handle, operations: [{ op: 'add_resource', id: 'R2' }, { op: 'add_resource', id: 'R3', units_per_day: 4 }, { op: 'add_resource', id: 'R4', max_units_per_day: 6 }] });
   assert.equal(e.warnings, undefined);
   assert.equal(e.notes.length, 2);

@@ -14,7 +14,7 @@ const fail = (db: Db, ops: unknown[]) => { const r = applyOps(db, ops, { calenda
 function build(): Db {
   const db = { tables: {} } as Db;
   ok(db, [
-    { op: 'add_project', id: 'P', start: '2026-01-05' },
+    { op: 'add_project', currency: 'USD', id: 'P', start: '2026-01-05' },
     { op: 'add_resource', id: 'LAB', type: 'labor', price_per_unit: 10 },
     { op: 'add_resource', id: 'MAT', type: 'material', price_per_unit: 2 },
     { op: 'add_activity', id: 'A', name: 'Dig', duration_days: 20 },
@@ -104,7 +104,7 @@ test('store_period_performance: per period values, overwrite, Actual This Period
 
 test('store_period_performance: an activity without assignments stores its own actual labor and nonlabor units', () => {
   const db = { tables: {} } as Db;
-  ok(db, [{ op: 'add_project', id: 'P', start: '2026-01-05' }, { op: 'add_activity', id: 'B', name: 'No resources', duration_days: 10 }, { op: 'add_financial_periods', from: '2026-01-01', to: '2026-01-31', every: 'month' },
+  ok(db, [{ op: 'add_project', currency: 'USD', id: 'P', start: '2026-01-05' }, { op: 'add_activity', id: 'B', name: 'No resources', duration_days: 10 }, { op: 'add_financial_periods', from: '2026-01-01', to: '2026-01-31', every: 'month' },
     { op: 'set_fields', table: 'PROJECT', fields: { act_this_per_link_flag: 'Y' }, all: true },
     { op: 'set_fields', table: 'TASK', fields: { act_work_qty: 25, act_equip_qty: 4, act_this_per_work_qty: 25 }, all: true }]);
   const r = ok(db, [{ op: 'store_period_performance', period: '2026-01-01' }]).results[0] as any;
@@ -115,7 +115,7 @@ test('store_period_performance: an activity without assignments stores its own a
 
 test('financial period calendars: the first keeps the existing periods; a project reports on its own calendar', () => {
   const db = build();
-  ok(db, [{ op: 'add_project', id: 'Q', start: '2026-01-05' }, { op: 'add_financial_periods', from: '2026-01-01', to: '2026-02-28', every: 'month' }]);
+  ok(db, [{ op: 'add_project', currency: 'USD', id: 'Q', start: '2026-01-05' }, { op: 'add_financial_periods', from: '2026-01-01', to: '2026-02-28', every: 'month' }]);
   ok(db, [{ op: 'add_financial_period_calendar', name: 'Monthly' }, { op: 'add_financial_period_calendar', name: 'Weekly' }]);
   const cal = (n: string) => rows(db, 'FINTMPL').find((c) => c.fintmpl_name === n)!.fintmpl_id;
   assert.ok(rows(db, 'FINDATES').every((f) => f.fintmpl_id === cal('Monthly')), 'the periods the file had belong to the first (default) calendar');
@@ -190,7 +190,7 @@ test('review fixes: merged files keep one calendar and match periods within it; 
   const db = build();
   ok(db, [{ op: 'add_financial_periods', from: '2026-01-01', to: '2026-01-31', every: 'month' }, { op: 'add_financial_period_calendar', name: 'Monthly' }, { op: 'add_financial_period_calendar', name: 'Weekly' }, { op: 'update_financial_period_calendar', name: 'Weekly', default: true }]);
   assert.equal(rows(db, 'PROJECT')[0].fintmpl_id, rows(db, 'FINTMPL').find((c) => c.fintmpl_name === 'Monthly')!.fintmpl_id);
-  ok(db, [{ op: 'add_project', id: 'NEW', start: '2026-02-02' }]);
+  ok(db, [{ op: 'add_project', currency: 'USD', id: 'NEW', start: '2026-02-02' }]);
   assert.equal(rows(db, 'PROJECT').find((p) => p.proj_short_name === 'NEW')!.fintmpl_id, rows(db, 'FINTMPL').find((c) => c.fintmpl_name === 'Weekly')!.fintmpl_id, 'a new project gets the default');
   ok(db, [{ op: 'set_fields', table: 'PROJECT', fields: { act_this_per_link_flag: 'Y' }, all: true }, { op: 'update_activity', id: 'A', actual_start: '2026-01-05' }]);
   ok(db, [{ op: 'set_period_actuals', activity: 'A', period: '2026-01-01', values: { labor_cost: 0 } }]);

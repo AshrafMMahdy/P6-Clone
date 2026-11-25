@@ -20,7 +20,7 @@ const RENAMED = 'أعمال الحفر (مراجعة)';
 /** An Arabic project as the clone writes it, in the given encoding. */
 function arabicFile(enc: TextEncodingName): string {
   const db: Db = { tables: {} };
-  assert.equal(applyOps(db, [{ op: 'add_project', id: 'AR', name: 'برج القاهرة', start: '2026-03-02' }, { op: 'add_wbs', code: 'S', name: 'الهيكل' },
+  assert.equal(applyOps(db, [{ op: 'add_project', currency: 'USD', id: 'AR', name: 'برج القاهرة', start: '2026-03-02' }, { op: 'add_wbs', code: 'S', name: 'الهيكل' },
     { op: 'add_activity', id: 'A1', name: 'أعمال الحفر', wbs: 'S', duration_days: 5 }, { op: 'add_activity', id: 'A2', name: 'صب الخرسانة', wbs: 'S', duration_days: 3 },
     { op: 'add_relationship', pred: 'A1', succ: 'A2' }]).ok, true);
   const path = join(dir, `ar-${enc}.xer`);
@@ -78,7 +78,7 @@ test('each handle keeps its own encoding: two open at once save in their own; a 
   evict(sessions.get(u.handle)!, 'memory'); // moved out of memory and back: still its own
   assert.equal(detectEncoding(await save(u)).encoding, 'utf-8');
   // a new project: the code page P6 would use (Arabic: windows-1256), as before
-  const n = await call('new_project', { id: 'NW', start: '2026-03-02' });
+  const n = await call('new_project', { currency: 'USD', id: 'NW', start: '2026-03-02' });
   await call('edit', { handle: n.handle, operations: [{ op: 'add_activity', id: 'N1', name: 'أعمال الحفر والردم', duration_days: 1 }] });
   assert.equal(detectEncoding(await save(n)).encoding, 'windows-1256');
   // text the code page it was read in cannot hold: written as P6 would (UTF-8 here), with a note

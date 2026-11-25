@@ -1,4 +1,5 @@
 // Built-in reports: tabular data that the UI renders, prints and exports to CSV.
+import { formatMoney } from '../currency.ts';
 import type { DayHours } from '../project/units.ts';
 import { groupBy, indexBy, rows, type Db, type Row } from '../db.ts';
 import { formatP6Date, parseP6Date, MIN_PER_DAY } from '../dates.ts';
@@ -13,7 +14,8 @@ export interface Report { title: string; subtitle?: string; columns: string[]; r
 export interface ReportDef { id: string; title: string; group: string; build: (db: Db, projIds: string[], o: ReportOpts) => Report }
 
 const days = (h: string | number | undefined, o: ReportOpts, t?: Row) => (h === '' || h == null ? '' : String(Math.round((Number(h) / (t && o.dayHours ? o.dayHours.task(t) : o.hoursPerDay)) * 10) / 10));
-const money = (v: number) => v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+/** An amount in the file's base currency, as P6's reports show it (core/currency.ts). */
+const money = (db: Db, v: number) => formatMoney(db, v);
 const ratio = (v: number) => (v ? v.toFixed(2) : '');
 const start = (t: Row, o: ReportOpts) => (t.act_start_date ? `${o.fmtDate(t.act_start_date)} A` : o.fmtDate(t.restart_date || t.early_start_date || t.target_start_date));
 const finish = (t: Row, o: ReportOpts) => (t.act_end_date ? `${o.fmtDate(t.act_end_date)} A` : o.fmtDate(t.reend_date || t.early_end_date || t.target_end_date));
@@ -98,7 +100,7 @@ export const REPORTS: ReportDef[] = [
         out.push({ cells: [r.rsrc_short_name, r.rsrc_name, '', '', '', '', '', ''], bold: true });
         for (const a of list) {
           const t = tasks.get(a.task_id);
-          out.push({ cells: [t?.task_code ?? '', t?.task_name ?? '', a.target_qty, String(Number(a.act_reg_qty || 0) + Number(a.act_ot_qty || 0)), a.remain_qty, t ? start(t, o) : '', t ? finish(t, o) : '', money(Number(a.target_cost || 0))], level: 1 });
+          out.push({ cells: [t?.task_code ?? '', t?.task_name ?? '', a.target_qty, String(Number(a.act_reg_qty || 0) + Number(a.act_ot_qty || 0)), a.remain_qty, t ? start(t, o) : '', t ? finish(t, o) : '', money(db, Number(a.target_cost || 0))], level: 1 });
         }
       }
       return { title: 'Resource Assignments', subtitle: projTitle(db, projIds), columns: ['Activity ID', 'Activity Name', 'Budgeted Units', 'Actual Units', 'Remaining Units', 'Start', 'Finish', 'Budgeted Cost'], rows: out };
@@ -114,7 +116,7 @@ export const REPORTS: ReportDef[] = [
       const out: Report['rows'] = [];
       wbsWalk(db, projIds, (w, level, path) => {
         const l = total(w);
-        out.push({ cells: [w.proj_node_flag === 'Y' ? w.wbs_short_name : path, w.wbs_name, money(l.bac), money(l.actual), money(l.remaining), money(l.eac), money(l.pv), money(l.ev), ratio(spi(l)), ratio(cpi(l))], level, bold: level === 0 });
+        out.push({ cells: [w.proj_node_flag === 'Y' ? w.wbs_short_name : path, w.wbs_name, money(db, l.bac), money(db, l.actual), money(db, l.remaining), money(db, l.eac), money(db, l.pv), money(db, l.ev), ratio(spi(l)), ratio(cpi(l))], level, bold: level === 0 });
       });
       return { title: 'Cost and Earned Value by WBS', subtitle: projTitle(db, projIds), columns: ['WBS', 'Name', 'Budget (BAC)', 'Actual', 'Remaining', 'At Completion', 'Planned Value', 'Earned Value', 'SPI', 'CPI'], rows: out };
     },
@@ -128,7 +130,7 @@ export const REPORTS: ReportDef[] = [
       for (const e of rows(db, 'PROJCOST').filter((x) => projIds.includes(x.proj_id))) add(e.acct_id || '', Number(e.target_cost || 0), Number(e.act_cost || 0), Number(e.remain_cost || 0));
       const accts = indexBy(rows(db, 'ACCOUNT'), 'acct_id');
       return { title: 'Cost by Cost Account', subtitle: projTitle(db, projIds), columns: ['Cost Account', 'Name', 'Budgeted', 'Actual', 'Remaining', 'At Completion'],
-        rows: [...by].map(([k, v]) => ({ cells: [accts.get(k)?.acct_short_name ?? (k ? k : '(none)'), accts.get(k)?.acct_name ?? '', money(v.bud), money(v.act), money(v.rem), money(v.act + v.rem)] })) };
+        rows: [...by].map(([k, v]) => ({ cells: [accts.get(k)?.acct_short_name ?? (k ? k : '(none)'), accts.get(k)?.acct_name ?? '', money(db, v.bud), money(db, v.act), money(db, v.rem), money(db, v.act + v.rem)] })) };
     },
   },
 ];

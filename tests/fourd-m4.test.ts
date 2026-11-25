@@ -12,7 +12,7 @@ const call = async (name: string, args: Record<string, unknown>) => {
 };
 
 test('4D M4: links survive a re-export that changes every GlobalId; a deleted element loses its links', async () => {
-  const np = (await call('new_project', { id: 'RL', start: '2026-03-02' })).d;
+  const np = (await call('new_project', { currency: 'USD', id: 'RL', start: '2026-03-02' })).d;
   const h = np.handle, owner_key = np.owner_key;
   await call('edit', { handle: h, owner_key, operations: [{ op: 'add_activity', id: 'W1', name: 'Level 1 walls', duration_days: 5 }, { op: 'add_activity', id: 'W2', name: 'Level 2 walls', duration_days: 5 }] });
   await call('open_model', { handle: h, owner_key, path: join(FX, 'Duplex_A_20110907.ifc') });
@@ -44,7 +44,7 @@ test('4D M4: links survive a re-export that changes every GlobalId; a deleted el
 const SCHEP = join(import.meta.dirname, '..', 'sample 4D');
 const schepSp = join(SCHEP, 'synchro', 'schependomlaan', 'Synchro project Schependomlaan.sp'), schepIfc = join(SCHEP, 'ifc-models', 'schependomlaan', 'IFC Schependomlaan.ifc');
 test('4D: a SYNCHRO project (.sp) comes in as activities and their element links to the design model', { skip: !existsSync(schepSp) || !existsSync(schepIfc) ? 'Schependomlaan samples not present' : false, timeout: 600_000 }, async () => {
-  const np = (await call('new_project', { id: 'SCH', start: '2015-02-02' })).d;
+  const np = (await call('new_project', { currency: 'USD', id: 'SCH', start: '2015-02-02' })).d;
   const h = np.handle, owner_key = np.owner_key;
   assert.equal((await call('open_model', { handle: h, owner_key, path: schepIfc, geometry: false })).err, false);
   const dry = await call('import_4d', { handle: h, owner_key, path: schepSp, link: false, create_activities: true });
@@ -61,7 +61,7 @@ test('4D: a SYNCHRO project (.sp) comes in as activities and their element links
 
 const paths3d = join(SCHEP, 'synchro', 'bentley-kb-training', 'Challenge Models', 'Challenge Model_3D Paths.sp');
 test('4D: a SYNCHRO project (.sp) opened as the model itself: its 3D objects are the elements, and its own tasks link to them', { skip: !existsSync(paths3d) && 'SYNCHRO training samples not present', timeout: 600_000 }, async () => {
-  const np = (await call('new_project', { id: 'SPM', start: '2018-07-02' })).d;
+  const np = (await call('new_project', { currency: 'USD', id: 'SPM', start: '2018-07-02' })).d;
   const h = np.handle, owner_key = np.owner_key;
   const om = await call('open_model', { handle: h, owner_key, path: paths3d });
   assert.equal(om.err, false, JSON.stringify(om.d).slice(0, 400));
@@ -87,7 +87,7 @@ test('4D: a SYNCHRO project (.sp) opened as the model itself: its 3D objects are
   // the model's index as it is found again after a restart names the conversion's IFC, not the .sp: the file's own
   // objects are what decide the route
   const { spToIfc } = await import('../core/bim/synchroModel.ts');
-  const np2 = (await call('new_project', { id: 'SPR', start: '2018-07-02' })).d;
+  const np2 = (await call('new_project', { currency: 'USD', id: 'SPR', start: '2018-07-02' })).d;
   assert.equal((await call('open_model', { handle: np2.handle, owner_key: np2.owner_key, path: (await spToIfc(paths3d)).ifc, geometry: false })).err, false);
   const again = await call('import_4d', { handle: np2.handle, owner_key: np2.owner_key, path: paths3d, create_activities: true });
   assert.equal(again.d.added, 4, JSON.stringify(again.d).slice(0, 300));
@@ -97,7 +97,7 @@ test('4D M7 (optional): the SYNCHRO cloud connector stays dormant without Bentle
   const saved = [process.env.BENTLEY_CLIENT_ID, process.env.BENTLEY_CLIENT_SECRET];
   delete process.env.BENTLEY_CLIENT_ID; delete process.env.BENTLEY_CLIENT_SECRET;
   try {
-    const np = (await call('new_project', { id: 'SC', start: '2026-03-02' })).d;
+    const np = (await call('new_project', { currency: 'USD', id: 'SC', start: '2026-03-02' })).d;
     const r = await call('synchro_cloud', { handle: np.handle, owner_key: np.owner_key, action: 'push_tasks', schedule_id: 'x' });
     assert.equal(r.err, false);
     assert.equal(r.d.configured, false);

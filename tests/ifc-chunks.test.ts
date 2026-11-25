@@ -130,7 +130,7 @@ test('a big model meshed in chunks: tiles of every chunk, numbered on, and every
 test('render_4d refuses a model whose geometry did not build (no empty building), and says why', { timeout: 120_000 }, async () => {
   const { callTool, toolResult } = await import('../mcp/server.ts');
   const call = async (name: string, args: Record<string, unknown>) => { const x = await callTool(name, args); return { err: x.isError, d: toolResult(x.out, x.isError).structuredContent as any }; };
-  const np = (await call('new_project', { id: 'NG', start: '2026-03-02' })).d;
+  const np = (await call('new_project', { currency: 'USD', id: 'NG', start: '2026-03-02' })).d;
   const f = join(mkdtempSync(join(tmpdir(), 'p6-ng-')), 'small.ifc');
   writeFileSync(f, walls(3), 'latin1'); // a model of its own (not cached), opened with a geometry worker that is missing
   await withEnv({ WHIQ_IFC_GEOM_WORKER: join(tmpdir(), 'no-such-worker.mjs') }, async () => {

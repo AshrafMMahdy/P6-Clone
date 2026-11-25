@@ -349,7 +349,7 @@ test('Microsoft Project task UIDs stay on the activities: source_uid, uid:<UID> 
   assert.equal(rows(db, 'TASK').find((t) => t.task_name === 'Layouts')!.target_drtn_hr_cnt, '24');
   assert.match(applyOps(db, [{ op: 'delete_activity', id: 'uid:999' }]).error!.message, /No activity with Microsoft Project task UID 999/);
   // a private field: not in XER or P6 XML
-  assert.ok(!new TextDecoder().decode(writeXer(db, { version: '19.12' })).includes('msp_uid'));
+  assert.ok(!new TextDecoder().decode(writeXer(db, { version: '19.12', currency: 'USD' })).includes('msp_uid'));
   assert.ok(!writeP6Xml(db, {}).includes('msp_uid'));
   assert.deepEqual(validateXer(db, []).filter((f) => f.field === '_msp_uid'), []);
   // written back to MSPDI and MPX, the tasks keep their UIDs (summary tasks too); a new activity gets an unused one

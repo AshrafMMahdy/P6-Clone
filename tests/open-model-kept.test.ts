@@ -24,7 +24,7 @@ const setup = async (id: string) => {
   process.env.P6CLONE_MODEL_CACHE = mkdtempSync(join(tmpdir(), 'p6-okept-'));
   const file = join(mkdtempSync(join(tmpdir(), 'p6-okept-ifc-')), 'duplex.ifc');
   copyFileSync(FX, file);
-  const np = (await call('new_project', { id, start: '2026-03-02' })).d;
+  const np = (await call('new_project', { currency: 'USD', id, start: '2026-03-02' })).d;
   return { cache: process.env.P6CLONE_MODEL_CACHE, file, handle: np.handle, owner_key: np.owner_key };
 };
 /** The chunks kept whole in the cache: <cache>/<model>.chunks/<way>/<k>/kept.json. */

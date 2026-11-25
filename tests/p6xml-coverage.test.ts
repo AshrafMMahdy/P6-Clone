@@ -171,7 +171,7 @@ test('period actuals (Store Period Performance, set_period_actuals) are P6\'s Ac
   const { rows } = await import('../core/db.ts');
   const db = { tables: {} } as Db;
   const ok = (ops: unknown[]) => { const r = applyOps(db, ops, { calendarDays: true }); assert.equal(r.ok, true, JSON.stringify(r.error)); };
-  ok([{ op: 'add_project', id: 'P', start: '2026-01-05' }, { op: 'add_resource', id: 'LAB', type: 'labor', price_per_unit: 10 }, { op: 'add_resource', id: 'MAT', type: 'material', price_per_unit: 2 },
+  ok([{ op: 'add_project', currency: 'USD', id: 'P', start: '2026-01-05' }, { op: 'add_resource', id: 'LAB', type: 'labor', price_per_unit: 10 }, { op: 'add_resource', id: 'MAT', type: 'material', price_per_unit: 2 },
     { op: 'add_role', id: 'ENG', name: 'Engineer' }, { op: 'add_activity', id: 'A', name: 'Dig', duration_days: 40 },
     { op: 'assign_resource', activity: 'A', resource: 'LAB', units: 320 }, { op: 'assign_resource', activity: 'A', resource: 'MAT', units: 100 }, { op: 'assign_role', activity: 'A', role: 'ENG', units: 80 },
     { op: 'add_financial_period_calendar', name: 'Monthly' }, { op: 'add_financial_periods', from: '2026-01-01', to: '2026-03-31', every: 'month' },
@@ -278,7 +278,7 @@ test('an export to P6 XML says what it leaves out: fields, rows and the reason, 
   const { callTool, toolResult } = await import('../mcp/server.ts');
   const call = async (name: string, args: Record<string, unknown>) => { const r = await callTool(name, args); return { err: r.isError, d: toolResult(r.out, r.isError).structuredContent as any }; };
   const dir = mkdtempSync(join(tmpdir(), 'p6-xmlloss-'));
-  const np = (await call('new_project', { id: 'LOSS', start: '2026-03-02' })).d;
+  const np = (await call('new_project', { currency: 'USD', id: 'LOSS', start: '2026-03-02' })).d;
   const H = { handle: np.handle, owner_key: np.owner_key };
   const { sessions } = await import('../mcp/runtime.ts');
   const s = sessions.get(np.handle)!;

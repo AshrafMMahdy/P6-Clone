@@ -42,7 +42,7 @@ test('a Revit 2023 project opens without a schedule, as IFC4 read by rvt-rs, wit
 });
 
 test('links made on the RVT hold when Revit\u2019s own IFC export of it replaces the model (the same GlobalIds)', { skip: skip || (!existsSync(IFC) && 'no IFC export beside it'), timeout: 120_000 }, async () => {
-  const np = (await call('new_project', { id: 'P', start: '2026-03-02' })).d;
+  const np = (await call('new_project', { currency: 'USD', id: 'P', start: '2026-03-02' })).d;
   const h = np.handle, owner_key = np.owner_key;
   await call('edit', { handle: h, owner_key, operations: [{ op: 'add_activity', id: 'W', name: 'Walls', duration_days: 5 }] });
   await call('open_model', { handle: h, owner_key, path: RVT });

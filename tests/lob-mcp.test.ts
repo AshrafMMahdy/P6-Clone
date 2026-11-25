@@ -23,7 +23,7 @@ const TASKS = [
 
 async function plan() {
   // 1: a file to hold it
-  const np = (await call('new_project', { id: 'DES', start: '2026-03-02' })).d;
+  const np = (await call('new_project', { currency: 'USD', id: 'DES', start: '2026-03-02' })).d;
   const h = np.handle, owner_key = np.owner_key;
   // 2: the LOB plan, beside the CPM project
   const c = await call('lob_create', { handle: h, owner_key, id: 'TOWER', start: '2026-03-02', locations: { levels: ['Part', 'Floor'], grid: [3, 10] }, tasks: TASKS, links: [{ pred: 'CS', succ: 'DW', location_lag: 1 }, { pred: 'DW', succ: 'PT' }] });
@@ -117,7 +117,7 @@ test('Tactplan: export, then the export imported again as a new plan with the sa
 
 const VICO = process.env.P6CLONE_VICO_SAMPLE || 'D:\\Backup\\Documents\\ConREM\\2. Semester 3 & 4 Berlin\\1. Semester 3\\Case Studies 2\\Term Project 2 Vico\\1. Outputs\\2. After Optimization\\0. Case Studies II -- Vico Term Project II -- After Optimization 16 January 2024.dpp';
 test('lob_import of the user\u2019s Vico project: 14 trades on 2 parts × 9 floors, Concrete skeleton 14-04-2025 to 13-02-2026', { skip: !existsSync(VICO) && 'the Vico sample is not here' }, async () => {
-  const np = (await call('new_project', { id: 'X', start: '2025-01-31' })).d;
+  const np = (await call('new_project', { currency: 'USD', id: 'X', start: '2025-01-31' })).d;
   const i = await call('lob_import', { handle: np.handle, owner_key: np.owner_key, path: VICO, id: 'VICO' });
   assert.equal(i.err, false, JSON.stringify(i.d).slice(0, 400));
   const v = (await call('lob_view', { handle: np.handle, project: 'VICO' })).d;
@@ -187,7 +187,7 @@ test('L-1: two LOB plans in one file: creating, importing, editing and takt-appl
 });
 
 test('L-3: a large LOB edit runs as a job: the server answers meanwhile, the job says its step, cancel_job keeps nothing', { timeout: 120_000 }, async () => {
-  const np = (await call('new_project', { id: 'DES', start: '2026-03-02' })).d;
+  const np = (await call('new_project', { currency: 'USD', id: 'DES', start: '2026-03-02' })).d;
   const h = np.handle, owner_key = np.owner_key;
   const tasks = Array.from({ length: 40 }, (_, i) => ({ code: `T${i}`, name: `Task ${i}`, trade: `Trade ${i}`, level: 'Floor', unit: 'm2', consumption: 0.5, quantity: 200, crew_size: 4 }));
   const c = await call('lob_create', { handle: h, owner_key, id: 'BIG', start: '2026-03-02', locations: { levels: ['Part', 'Floor'], grid: [3, 40] }, tasks, links: tasks.slice(1).map((t, i) => ({ pred: `T${i}`, succ: t.code })) });
@@ -209,7 +209,7 @@ test('L-3: a large LOB edit runs as a job: the server answers meanwhile, the job
 });
 
 test('L-7: an Activity ID past 40 characters is refused when the plan would make it, and nothing is made', async () => {
-  const np = (await call('new_project', { id: 'DES', start: '2026-03-02' })).d;
+  const np = (await call('new_project', { currency: 'USD', id: 'DES', start: '2026-03-02' })).d;
   const r = await call('lob_create', { handle: np.handle, owner_key: np.owner_key, id: 'LONG', start: '2026-03-02', locations: { levels: ['Floor'], list: [{ code: 'BUILDING-A-NORTH-WING-LEVEL-01', name: 'L1', level: 1, parent: null }] }, tasks: [{ code: 'CONCRETE-WORKS', name: 'Concrete', consumption: 1, quantity: 1, crew_size: 1 }] });
   assert.equal(r.err, true);
   assert.equal(r.d.error.code, 'lob_refused');
@@ -260,7 +260,7 @@ test('L-5: the Tactplan export carries each subtask\u2019s dates and trade; bad 
 test('L-9: an LOB plan counts in projects_mb; lob_takt\u2019s check says nothing of unsaved changes', async () => {
   const mb = async () => (await call('server_status', {})).d.memory.projects_mb;
   const before = await mb();
-  const np = (await call('new_project', { id: 'DES', start: '2026-03-02' })).d;
+  const np = (await call('new_project', { currency: 'USD', id: 'DES', start: '2026-03-02' })).d;
   const after0 = await mb();
   const tasks = Array.from({ length: 30 }, (_, i) => ({ code: `T${i}`, name: `Task ${i}`, consumption: 0.5, quantity: 200, crew_size: 4 }));
   await call('lob_create', { handle: np.handle, owner_key: np.owner_key, id: 'BIG', start: '2026-03-02', locations: { levels: ['Part', 'Floor'], grid: [3, 40] }, tasks, takt: { takt_days: 5 } });

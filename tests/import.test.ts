@@ -240,7 +240,7 @@ test('a copy, a baseline and a second import do not add a shared row twice', () 
 test('assignment codes are matched by name like the other code kinds; a baseline shares them', () => {
   const db: Db = { tables: {} };
   const ok = (ops: unknown[]) => { const r = applyOps(db, ops); assert.ok(r.ok, JSON.stringify(r.error)); };
-  ok([{ op: 'add_project', id: 'P', start: '2026-01-05' }, { op: 'add_activity', id: 'A', name: 'A', duration_days: 5 }, { op: 'add_resource', id: 'R1', name: 'Crew' }, { op: 'assign_resource', activity: 'A', resource: 'R1', units_per_day: 8 },
+  ok([{ op: 'add_project', currency: 'USD', id: 'P', start: '2026-01-05' }, { op: 'add_activity', id: 'A', name: 'A', duration_days: 5 }, { op: 'add_resource', id: 'R1', name: 'Crew' }, { op: 'assign_resource', activity: 'A', resource: 'R1', units_per_day: 8 },
     { op: 'add_code_type', name: 'Trade', subject: 'resource', values: [{ code: 'T1' }] }, { op: 'add_code_type', name: 'Kind', subject: 'assignment', values: [{ code: 'K1' }, { code: 'K2' }] },
     { op: 'assign_code', type: 'Trade', value: 'T1', resource: 'R1' }, { op: 'assign_code', type: 'Kind', value: 'K1', activity: 'A', resource: 'R1' }]);
   const n = (t: string) => db.tables[t].rows.length;
@@ -261,7 +261,7 @@ test('assignment codes are matched by name like the other code kinds; a baseline
 test('a baseline keeps its links to other projects, and nothing schedules or analyses with them until it is restored', () => {
   const db: Db = { tables: {} };
   const ok = (ops: unknown[]) => { const r = applyOps(db, ops); assert.ok(r.ok, JSON.stringify(r.error)); };
-  ok([{ op: 'add_project', id: 'P', start: '2026-01-05' }, { op: 'add_activity', id: 'A', name: 'A', duration_days: 20 }, { op: 'add_project', id: 'Q', start: '2026-01-05' },
+  ok([{ op: 'add_project', currency: 'USD', id: 'P', start: '2026-01-05' }, { op: 'add_activity', id: 'A', name: 'A', duration_days: 20 }, { op: 'add_project', currency: 'USD', id: 'Q', start: '2026-01-05' },
     { op: 'add_activity', project: 'Q', id: 'B', name: 'B', duration_days: 5 }, { op: 'add_relationship', pred: 'A', pred_project: 'P', succ: 'B', project: 'Q' }]);
   const live = () => db.tables.PROJECT.rows.filter((p) => !p._baseline_of).map((p) => p.proj_id);
   const b = db.tables.TASK.rows.find((t) => t.task_code === 'B')!;
@@ -299,7 +299,7 @@ test('a baseline keeps its links to other projects, and nothing schedules or ana
 test('a second import with other shared values leaves one value per resource: kept, or updated when resources are updated', () => {
   const build = (): Db => {
     const db: Db = { tables: {} };
-    const r = applyOps(db, [{ op: 'add_project', id: 'P', start: '2026-01-05' }, { op: 'add_activity', id: 'A', name: 'A', duration_days: 5 }, { op: 'add_resource', id: 'R1', name: 'Crew' }, { op: 'add_role', id: 'RO' },
+    const r = applyOps(db, [{ op: 'add_project', currency: 'USD', id: 'P', start: '2026-01-05' }, { op: 'add_activity', id: 'A', name: 'A', duration_days: 5 }, { op: 'add_resource', id: 'R1', name: 'Crew' }, { op: 'add_role', id: 'RO' },
       { op: 'add_code_type', name: 'Trade', subject: 'resource', values: [{ code: 'T1' }, { code: 'T2' }] }, { op: 'assign_code', type: 'Trade', value: 'T1', resource: 'R1' },
       { op: 'add_udf', name: 'Grade', subject: 'resource' }, { op: 'set_udf', udf: 'Grade', resource: 'R1', value: 'A' },
       { op: 'add_row', table: 'RSRCROLE', fields: { rsrc_id: '1', role_id: '1', skill_level: '3' } }]);
@@ -319,7 +319,7 @@ test('a second import with other shared values leaves one value per resource: ke
 
 test('a copy of a project has no baseline of its own: the source\'s project, primary, secondary and tertiary baselines stay the source\'s', () => {
   const db: Db = { tables: {} };
-  const r = applyOps(db, [{ op: 'add_project', id: 'P', start: '2026-01-05' }, { op: 'add_activity', id: 'A', name: 'A', duration_days: 5 }, { op: 'save_baseline', name: 'BL0', assign_as: 'project' }, { op: 'save_baseline', name: 'BL1', assign_as: 'bl1' }, { op: 'copy_project', from: 'P', id: 'CP' }]);
+  const r = applyOps(db, [{ op: 'add_project', currency: 'USD', id: 'P', start: '2026-01-05' }, { op: 'add_activity', id: 'A', name: 'A', duration_days: 5 }, { op: 'save_baseline', name: 'BL0', assign_as: 'project' }, { op: 'save_baseline', name: 'BL1', assign_as: 'bl1' }, { op: 'copy_project', from: 'P', id: 'CP' }]);
   assert.ok(r.ok, JSON.stringify(r.error));
   const of = (id: string) => { const p = db.tables.PROJECT.rows.find((x) => x.proj_short_name === id)!; return [p.sum_base_proj_id, p._bl1, p._bl2, p._bl3].map((v) => v || ''); };
   assert.ok(of('P')[0] !== '' && of('P')[1] !== '', 'P keeps its two');
@@ -330,14 +330,14 @@ test('a copy of a project has no baseline of its own: the source\'s project, pri
 test('import: baselines keep their own project; update leaves one schedule-options row and one value per assignment code; a skipped assignment code takes its assignments with it', () => {
   const build = (id: string): Db => {
     const db: Db = { tables: {} };
-    const r = applyOps(db, [{ op: 'add_project', id, start: '2026-01-05' }, { op: 'add_activity', id: 'A', name: 'A', duration_days: 5 }, { op: 'add_resource', id: 'R1', name: 'Crew' }, { op: 'assign_resource', activity: 'A', resource: 'R1', units_per_day: 8 },
+    const r = applyOps(db, [{ op: 'add_project', currency: 'USD', id, start: '2026-01-05' }, { op: 'add_activity', id: 'A', name: 'A', duration_days: 5 }, { op: 'add_resource', id: 'R1', name: 'Crew' }, { op: 'assign_resource', activity: 'A', resource: 'R1', units_per_day: 8 },
       { op: 'add_code_type', name: 'Kind', subject: 'assignment', values: [{ code: 'K1' }, { code: 'K2' }] }, { op: 'assign_code', type: 'Kind', value: 'K1', activity: 'A', resource: 'R1' }]);
     assert.ok(r.ok, JSON.stringify(r.error));
     return db;
   };
   // (1) a file with two projects and a baseline of each, imported into a file that already has a project: each baseline is still its own project's
   const two = build('P');
-  assert.ok(applyOps(two, [{ op: 'add_project', id: 'Q', start: '2026-01-05' }, { op: 'add_activity', project: 'Q', id: 'B', name: 'B', duration_days: 5 }, { op: 'save_baseline', project: 'P', name: 'BLP' }, { op: 'save_baseline', project: 'Q', name: 'BLQ' }]).ok);
+  assert.ok(applyOps(two, [{ op: 'add_project', currency: 'USD', id: 'Q', start: '2026-01-05' }, { op: 'add_activity', project: 'Q', id: 'B', name: 'B', duration_days: 5 }, { op: 'save_baseline', project: 'P', name: 'BLP' }, { op: 'save_baseline', project: 'Q', name: 'BLQ' }]).ok);
   const file = readRaw(writeXer(two, { version: '18.8' }), 'xer').db, into = build('Z');
   importIntoDb(into, file, defaultPlan(file));
   const owner = (bl: string) => { const b = into.tables.PROJECT.rows.find((p) => p.proj_short_name === bl)!; return into.tables.PROJECT.rows.find((p) => p.proj_id === b._baseline_of)?.proj_short_name; };
@@ -351,14 +351,14 @@ test('import: baselines keep their own project; update leaves one schedule-optio
   assert.equal(here.tables.ASGNMNTCATVAL.rows.find((v) => v.asgnmnt_catg_id === here.tables.ASGNMNTACAT.rows[0].asgnmnt_catg_id)!.asgnmnt_catg_short_name, 'K1', 'updated to the file\'s value');
   // (3) assignment codes not imported: the assignment comes without its code, nothing points at a code that is not there
   const fresh: Db = { tables: {} };
-  assert.ok(applyOps(fresh, [{ op: 'add_project', id: 'Z', start: '2026-01-05' }]).ok);
+  assert.ok(applyOps(fresh, [{ op: 'add_project', currency: 'USD', id: 'Z', start: '2026-01-05' }]).ok);
   importIntoDb(fresh, src, { ...defaultPlan(src), dict: { ASGNMNTCATTYPE: 'skip', ASGNMNTCATVAL: 'skip' } });
   assert.deepEqual([fresh.tables.ASGNMNTCATTYPE?.rows.length ?? 0, fresh.tables.ASGNMNTCATVAL?.rows.length ?? 0, fresh.tables.ASGNMNTACAT?.rows.length ?? 0, fresh.tables.TASKRSRC.rows.length], [0, 0, 0, 1]);
 });
 
 test('import: a project added into another keeps the target\'s schedule options; a project left out takes its own code values with it; rows the file gives no key are matched, not added again', () => {
   // (1) add_into: the file's project becomes a WBS node of the target, whose schedule options stay its own
-  const mk = (id: string, logic: string): Db => { const db: Db = { tables: {} }; const r = applyOps(db, [{ op: 'add_project', id, start: '2026-01-05' }, { op: 'add_activity', id: `${id}1`, name: 'x', duration_days: 5 }, { op: 'set_schedule_options', logic }]); assert.ok(r.ok, JSON.stringify(r.error)); return db; };
+  const mk = (id: string, logic: string): Db => { const db: Db = { tables: {} }; const r = applyOps(db, [{ op: 'add_project', currency: 'USD', id, start: '2026-01-05' }, { op: 'add_activity', id: `${id}1`, name: 'x', duration_days: 5 }, { op: 'set_schedule_options', logic }]); assert.ok(r.ok, JSON.stringify(r.error)); return db; };
   const target = mk('T', 'retained'), src = mk('S', 'override');
   const before = JSON.stringify(target.tables.SCHEDOPTIONS.rows);
   importIntoDb(target, src, { projects: [{ srcProjId: src.tables.PROJECT.rows[0].proj_id, action: 'add_into', targetProjId: target.tables.PROJECT.rows[0].proj_id }] });
@@ -379,7 +379,7 @@ test('import: a project added into another keeps the target\'s schedule options;
 
 test('P6 XML: a baseline is written once, and the file written opens', () => {
   const db: Db = { tables: {} };
-  assert.ok(applyOps(db, [{ op: 'add_project', id: 'P', start: '2026-01-05' }, { op: 'add_activity', id: 'A', name: 'A', duration_days: 5 }, { op: 'save_baseline', name: 'BL1', assign_as: 'project' }]).ok);
+  assert.ok(applyOps(db, [{ op: 'add_project', currency: 'USD', id: 'P', start: '2026-01-05' }, { op: 'add_activity', id: 'A', name: 'A', duration_days: 5 }, { op: 'save_baseline', name: 'BL1', assign_as: 'project' }]).ok);
   const parts: string[] = []; writeP6XmlTo(db, {}, (c) => parts.push(c));
   const xml = parts.join('');
   assert.deepEqual([(xml.match(/<Project>/g) ?? []).length, (xml.match(/<BaselineProject>/g) ?? []).length], [1, 1]);

@@ -39,7 +39,7 @@ test('F9 fills Float Path and Float Path Order when the option is on; total floa
   const db: Db = { tables: {} };
   const ok = (ops: unknown[]) => { const x = applyOps(db, ops); assert.ok(x.ok, JSON.stringify(x.error)); };
   ok([
-    { op: 'add_project', id: 'FP', start: '2026-03-02' },
+    { op: 'add_project', currency: 'USD', id: 'FP', start: '2026-03-02' },
     { op: 'add_activity', id: 'S', name: 'Start', type: 'start_milestone' },
     { op: 'add_activity', id: 'A', name: 'Long', duration_days: 10 },
     { op: 'add_activity', id: 'B', name: 'Short', duration_days: 4 },
@@ -228,7 +228,7 @@ test('pathsBetween: the paths kept by merging each successor’s best tails are 
 test('float_paths between: max is a positive whole number (no 0 = all: paths_total says how many), refused as bad_input naming between.max before any work; a loop is answered as bad_input naming it', async () => {
   const { sessions } = await import('../mcp/runtime.ts');
   const call = async (name: string, args: Record<string, unknown>) => { const r = await callTool(name, args); return { err: r.isError, d: toolResult(r.out, r.isError).structuredContent as any }; };
-  const np = (await call('new_project', { id: 'FPB', start: '2026-03-02' })).d;
+  const np = (await call('new_project', { currency: 'USD', id: 'FPB', start: '2026-03-02' })).d;
   const e = await call('edit', { handle: np.handle, owner_key: np.owner_key, operations: [
     ...['F', 'A', 'B', 'T'].map((id) => ({ op: 'add_activity', id, name: id, duration_days: 2 })),
     { op: 'add_relationship', pred: 'F', succ: 'A' }, { op: 'add_relationship', pred: 'F', succ: 'B' }, { op: 'add_relationship', pred: 'A', succ: 'T' }, { op: 'add_relationship', pred: 'B', succ: 'T' }] });
@@ -255,7 +255,7 @@ test('float_paths between: max is a positive whole number (no 0 = all: paths_tot
 test('float_paths between: a max that does not fit is refused up front, with what would fit, and what fits runs', async () => {
   const { config, sessions, usedMemory } = await import('../mcp/runtime.ts');
   const call = async (name: string, args: Record<string, unknown>) => { const r = await callTool(name, args); return { err: r.isError, d: toolResult(r.out, r.isError).structuredContent as any }; };
-  const np = (await call('new_project', { id: 'FPL', start: '2026-03-02' })).d;
+  const np = (await call('new_project', { currency: 'USD', id: 'FPL', start: '2026-03-02' })).d;
   const n = 150, ops: Record<string, unknown>[] = [{ op: 'add_activity', id: 'S', name: 'S', duration_days: 1 }];
   let prev = 'S';
   for (let i = 1; i <= n; i++) { ops.push({ op: 'add_activity', id: `a${i}`, name: 'a', duration_days: 1 }, { op: 'add_activity', id: `b${i}`, name: 'b', duration_days: 2 }, { op: 'add_activity', id: `J${i}`, name: 'J', duration_days: 1 }, { op: 'add_relationship', pred: prev, succ: `a${i}` }, { op: 'add_relationship', pred: prev, succ: `b${i}` }, { op: 'add_relationship', pred: `a${i}`, succ: `J${i}` }, { op: 'add_relationship', pred: `b${i}`, succ: `J${i}` }); prev = `J${i}`; }
@@ -296,7 +296,7 @@ test('float_paths between: the reservation is the tails really kept (a chain wit
   const { config, sessions, usedMemory } = await import('../mcp/runtime.ts');
   const { workNeed, BETWEEN_BYTES_PER_TAIL } = await import('../mcp/workset.ts');
   const call = async (name: string, args: Record<string, unknown>) => { const r = await callTool(name, args); return { err: r.isError, d: toolResult(r.out, r.isError).structuredContent as any }; };
-  const np = (await call('new_project', { id: 'FPC', start: '2026-03-02' })).d;
+  const np = (await call('new_project', { currency: 'USD', id: 'FPC', start: '2026-03-02' })).d;
   const n = 5000, ops: Record<string, unknown>[] = [];
   for (let i = 0; i < n; i++) ops.push({ op: 'add_activity', id: `c${i}`, name: 'c', duration_days: 1 });
   for (let i = 1; i < n; i++) ops.push({ op: 'add_relationship', pred: `c${i - 1}`, succ: `c${i}` });
@@ -326,7 +326,7 @@ test('float_paths between: the reservation counts the activities between even wi
   const { sessions } = await import('../mcp/runtime.ts');
   const { workNeed } = await import('../mcp/workset.ts');
   const call = async (name: string, args: Record<string, unknown>) => { const r = await callTool(name, args); return { err: r.isError, d: toolResult(r.out, r.isError).structuredContent as any }; };
-  const np = (await call('new_project', { id: 'FPD', start: '2026-03-02' })).d;
+  const np = (await call('new_project', { currency: 'USD', id: 'FPD', start: '2026-03-02' })).d;
   const h = { handle: np.handle, owner_key: np.owner_key };
   assert.equal((await call('edit', { ...h, operations: [{ op: 'add_activity', id: 'F', name: 'F', duration_days: 1 }, { op: 'add_activity', id: 'T', name: 'T', duration_days: 1 }, { op: 'add_relationship', pred: 'F', succ: 'T' }] })).err, false);
   await call('schedule', h);

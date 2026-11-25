@@ -36,7 +36,7 @@ test('export writes the code page P6 would use, so Arabic (and other scripts) su
   assert.deepEqual(rows(back, 'TASK').map((t) => t.task_name).slice(0, 50), rows(db, 'TASK').map((t) => t.task_name).slice(0, 50));
   // a schedule written in Arabic through the edit operations (the agent's way)
   const a = emptyDb();
-  assert.equal(applyOps(a, [{ op: 'add_project', id: 'AR1', name: 'برج سكني', start: '2027-01-03' }, { op: 'add_wbs', code: 'S', name: 'الهيكل الخرساني' }, { op: 'add_activity', id: 'A1000', name: 'صب الأساسات', wbs: 'S', duration_days: 5 }]).ok, true);
+  assert.equal(applyOps(a, [{ op: 'add_project', currency: 'USD', id: 'AR1', name: 'برج سكني', start: '2027-01-03' }, { op: 'add_wbs', code: 'S', name: 'الهيكل الخرساني' }, { op: 'add_activity', id: 'A1000', name: 'صب الأساسات', wbs: 'S', duration_days: 5 }]).ok, true);
   const x = parseXer(writeXer(a, { version: '19.12' })).db;
   assert.equal(rows(x, 'TASK')[0].task_name, 'صب الأساسات');
   assert.ok(rows(x, 'PROJWBS').some((w) => w.wbs_name === 'الهيكل الخرساني'));

@@ -13,7 +13,7 @@ testRoots();
 const call = async (name: string, args: Record<string, unknown>) => { const r = await callTool(name, args); return toolResult(r.out, r.isError, name).structuredContent as any; };
 const act = (id: string, d = 3) => ({ op: 'add_activity', id, name: id, duration_days: d });
 async function project(extra: unknown[] = []) {
-  const p = await call('new_project', { id: 'EC', start: '2026-03-02' });
+  const p = await call('new_project', { currency: 'USD', id: 'EC', start: '2026-03-02' });
   const e = await call('edit', { handle: p.handle, operations: [{ op: 'add_resource', id: 'R1', max_units_per_day: 8 }, act('A'), act('B'), act('C'), { op: 'add_relationship', pred: 'A', succ: 'B' }, ...extra] });
   assert.ok(e.ok !== false && !e.error, JSON.stringify(e));
   await call('schedule', { handle: p.handle });   // the saved dates are current
@@ -85,13 +85,14 @@ test('float_paths reads the saved dates: when they are not current it says so on
 });
 
 test('every named operation confirms its change in P6’s words: no column name, no file code, no internal number, no row without a name (a file with two projects)', async () => {
-  const p = await call('new_project', { id: 'P', start: '2026-01-05' }), h = p.handle as string;
+  const p = await call('new_project', { currency: 'USD', id: 'P', start: '2026-01-05' }), h = p.handle as string;
   const ran = new Set<string>(), lines: string[] = [], answers: any[] = [];
   const RAW = new Set(['set_fields', 'add_row', 'delete_rows']);   // the caller names the table and the column itself
   const FILE_CODE = /^(TT|TK|PR|CS|CP|DT|PT|RT|CT|FT|SD|CA|RV|WS|QT|rcal)_[A-Za-z0-9]+$/;
   const curve = [0, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
   const ops: Record<string, unknown>[] = [
-    { op: 'add_project', id: 'Q', start: '2026-02-02', name: 'Second' },
+    { op: 'add_project', currency: 'USD', id: 'Q', start: '2026-02-02', name: 'Second' },
+    { op: 'set_currency', code: 'EUR' },
     { op: 'add_eps', id: 'E1', name: 'Eps' }, { op: 'add_eps', id: 'E0', name: 'Top' }, { op: 'update_eps', id: 'E1', new_id: 'E2', name: 'Eps 2', parent: 'E0' },
     { op: 'add_financial_period_calendar', name: 'Fiscal' }, { op: 'add_financial_periods', from: '2026-01-01', to: '2026-03-31', every: 'month' },
     { op: 'add_calendar', name: 'Six', work_week: { sat: [['08:00', '12:00']] } },
@@ -262,7 +263,7 @@ test('every named operation confirms its change in P6’s words: no column name,
 });
 
 test('schedule options changed through the raw table are read as the scheduler reads them; two rows that change alike are two changes', async () => {
-  const p = await call('new_project', { id: 'RAWOPT', start: '2026-01-05' }), h = p.handle as string;
+  const p = await call('new_project', { currency: 'USD', id: 'RAWOPT', start: '2026-01-05' }), h = p.handle as string;
   let e = await call('edit', { handle: h, operations: [act('A'), { op: 'set_schedule_options', logic: 'retained' }] });
   assert.ok(!e.error, JSON.stringify(e.error));
   // override Y beside retained Y: the scheduler follows override (optionsFor in cpm.ts), and the answer says so
@@ -321,10 +322,10 @@ test('real files: a deleted resource by its ID, no line from a value to itself, 
   assert.deepEqual(lines(e), ['[TOWER-A-BL1] baseline: "baseline of TOWER-A" -> "restored as a project"']);
   assert.deepEqual(unnamedOf(h), []);
   // a project made in the edit that ties an existing project to it: the relationship is the existing project's logic too, so it is said, and its dates are no longer current
-  h = (await call('new_project', { id: 'EC', start: '2026-03-02' })).handle as string;
+  h = (await call('new_project', { currency: 'USD', id: 'EC', start: '2026-03-02' })).handle as string;
   await call('edit', { handle: h, operations: [act('A'), act('B'), { op: 'add_relationship', pred: 'A', succ: 'B' }] });
   await call('schedule', { handle: h });
-  e = await call('edit', { handle: h, operations: [{ op: 'add_project', id: 'Q', start: '2026-03-02' }, { op: 'add_activity', id: 'X', name: 'X', duration_days: 30, project: 'Q' }, { op: 'add_relationship', pred: 'X', pred_project: 'Q', succ: 'A', succ_project: 'EC' }] });
+  e = await call('edit', { handle: h, operations: [{ op: 'add_project', currency: 'USD', id: 'Q', start: '2026-03-02' }, { op: 'add_activity', id: 'X', name: 'X', duration_days: 30, project: 'Q' }, { op: 'add_relationship', pred: 'X', pred_project: 'Q', succ: 'A', succ_project: 'EC' }] });
   assert.ok(!e.error, JSON.stringify(e.error));
   assert.deepEqual(lines(e), ['[Q] project: null -> "added"', '[X in Q FS A in EC] relationship: null -> "added"']);
   assert.ok((e.notes as string[]).some((n) => /^The saved dates of EC are not what a recalculation gives/.test(n)), JSON.stringify(e.notes));

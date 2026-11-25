@@ -20,7 +20,7 @@ const call = async (name: string, args: Record<string, unknown> = {}) => { const
 /** A small XER, and the same file with a duplicated TASK row (P6 refuses it: unique constraint). */
 function files(dir: string) {
   const db: Db = { tables: {} };
-  assert.ok(applyOps(db, [{ op: 'add_project', id: 'R1', start: '2026-03-02' }, { op: 'add_activity', id: 'A1', name: 'One', duration_days: 2 }, { op: 'add_activity', id: 'A2', name: 'Two', duration_days: 2 }, { op: 'add_relationship', pred: 'A1', succ: 'A2' }]).ok);
+  assert.ok(applyOps(db, [{ op: 'add_project', currency: 'USD', id: 'R1', start: '2026-03-02' }, { op: 'add_activity', id: 'A1', name: 'One', duration_days: 2 }, { op: 'add_activity', id: 'A2', name: 'Two', duration_days: 2 }, { op: 'add_relationship', pred: 'A1', succ: 'A2' }]).ok);
   const text = new TextDecoder().decode(writeXer(db, { version: '19.12', encoding: 'utf-8' }));
   const good = join(dir, 'good.xer'), dup = join(dir, 'dup.xer'), junk = join(dir, 'junk.xer');
   writeFileSync(good, text);
@@ -39,7 +39,7 @@ test('MCP contract: unsaved_changes, error shape, p6_would_reject / lenient, clo
   const dir = mkdtempSync(join(tmpdir(), 'p6mcp-c-'));
   const f = files(dir);
   // a project in memory has unsaved changes; reads do not report them, changes and saves do
-  const np = await call('new_project', { id: 'N1', start: '2026-03-02' });
+  const np = await call('new_project', { currency: 'USD', id: 'N1', start: '2026-03-02' });
   assert.deepEqual([np.isError, typeof np.data.handle, np.data.unsaved_changes], [false, 'string', true]);
   const h = np.data.handle;
   assert.equal((await call('save', { handle: h, path: join(dir, 'n1.xer') })).data.unsaved_changes, false);
@@ -160,7 +160,7 @@ test('MCP contract: read and write roots, atomic saves into new folders, unsaved
   // once, so only the stdin-close path above can save there)
   if (process.platform === 'win32') return;
   const t = server(['--automation-read-root', inn, '--automation-write-root', join(base, 'out2')], base);
-  const n = await t.tool('new_project', { id: 'Fresh Plan', start: '2026-03-02' });
+  const n = await t.tool('new_project', { currency: 'USD', id: 'Fresh Plan', start: '2026-03-02' });
   await t.tool('open_file', { path: 'cfc.xer' });
   assert.equal(n.data.unsaved_changes, true);
   t.p.kill('SIGTERM');
@@ -271,7 +271,7 @@ test('a file that is no schedule is told for what it is: an Office file, a PDF, 
 test('import_file and transfer_progress say what P6 would refuse in the file they read (file_as_given, as the lenient open does); the import goes on as before; open_file lists every fatal finding', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'p6mcp-ga-'));
   const f = files(dir);
-  const np = (await call('new_project', { id: 'IMP', start: '2026-03-02' })).data;
+  const np = (await call('new_project', { currency: 'USD', id: 'IMP', start: '2026-03-02' })).data;
   const dry = await call('import_file', { handle: np.handle, owner_key: np.owner_key, path: f.dup, action: 'new', dry_run: true });
   assert.equal(dry.isError, false, JSON.stringify(dry.data).slice(0, 300));
   assert.equal(dry.data.file_as_given.p6_would_reject, true);
@@ -289,7 +289,7 @@ test('import_file and transfer_progress say what P6 would refuse in the file the
   if (!tp.isError) assert.equal(tp.data.file_as_given.p6_would_reject, true);
   // 60 duplicate IDs: the validator keeps 5 findings and a line for the rest, and the counts are the real ones
   const db: Db = { tables: {} };
-  assert.ok(applyOps(db, [{ op: 'add_project', id: 'BIG', start: '2026-03-02' }, ...Array.from({ length: 60 }, (_, i) => ({ op: 'add_activity', id: `A${i}`, name: `N${i}`, duration_days: 2 }))], { calendarDays: true }).ok);
+  assert.ok(applyOps(db, [{ op: 'add_project', currency: 'USD', id: 'BIG', start: '2026-03-02' }, ...Array.from({ length: 60 }, (_, i) => ({ op: 'add_activity', id: `A${i}`, name: `N${i}`, duration_days: 2 }))], { calendarDays: true }).ok);
   const lines = new TextDecoder().decode(writeXer(db, { version: '19.12', encoding: 'utf-8' })).split('\r\n');
   const out: string[] = [];
   let inTask = false;

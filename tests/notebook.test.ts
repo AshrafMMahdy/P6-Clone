@@ -28,7 +28,7 @@ const tableCount = (xer: string, t: string) => xer.split('\r\n').filter((l) => l
 
 test('a new project: set_notebook with project writes the project notebook (WBSMEMO on the root WBS, topic for projects / WBS); kept through XER and P6 XML', () => {
   const db: Db = { tables: {} };
-  ok(db, [{ op: 'add_project', id: 'NP', start: '2026-03-02' }, { op: 'add_activity', id: 'A1', name: 'One', duration_days: 1 }]);
+  ok(db, [{ op: 'add_project', currency: 'USD', id: 'NP', start: '2026-03-02' }, { op: 'add_activity', id: 'A1', name: 'One', duration_days: 1 }]);
   assert.deepEqual(ok(db, [{ op: 'set_notebook', project: 'NP', topic: 'Review Status', text: DRAFT }]), [{ notebook: 'NP / Review Status', project: 'NP' }]);
   const mt = rows(db, 'MEMOTYPE').find((m) => m.memo_type === 'Review Status')!;
   assert.deepEqual([mt.proj_flag, mt.wbs_flag, mt.task_flag, mt.eps_flag], ['Y', 'Y', 'N', 'N']);
@@ -93,7 +93,7 @@ test('a file with two MEMOTYPE tables (an earlier platform bug) opens as one, re
 test('MCP: set_notebook with project on a new and an opened project, saved and opened again (project_summary shows it); refused on a Microsoft Project file', async () => {
   const call = async (name: string, args: Record<string, unknown>) => { const r = await callTool(name, args); return toolResult(r.out, r.isError).structuredContent as any; };
   const dir = mkdtempSync(join(tmpdir(), 'p6nb-'));
-  const n = await call('new_project', { id: 'NB', start: '2026-03-02' });
+  const n = await call('new_project', { currency: 'USD', id: 'NB', start: '2026-03-02' });
   assert.equal((await call('edit', { handle: n.handle, operations: [{ op: 'set_notebook', project: 'NB', topic: 'Review Status', text: DRAFT }] })).ok, true);
   const p1 = join(dir, 'nb.xer');
   await call('save', { handle: n.handle, owner_key: n.owner_key, path: p1 });
@@ -147,7 +147,7 @@ test('text "" removes that topic\'s memo when there is one (removed: true), else
 
 test('WBS notebooks, topic "*" and clear_notebooks (the anonymise op): every notebook of the project and its baselines goes, whatever its topic; Tower-A\'s EPS notebook too', () => {
   const db: Db = { tables: {} };
-  ok(db, [{ op: 'add_project', id: 'NP', start: '2026-03-02' }, { op: 'add_wbs', code: 'S1', name: 'Structure' }, { op: 'add_activity', id: 'A1', name: 'One', wbs: 'S1', duration_days: 1 }]);
+  ok(db, [{ op: 'add_project', currency: 'USD', id: 'NP', start: '2026-03-02' }, { op: 'add_wbs', code: 'S1', name: 'Structure' }, { op: 'add_activity', id: 'A1', name: 'One', wbs: 'S1', duration_days: 1 }]);
   assert.deepEqual(ok(db, [{ op: 'set_notebook', wbs: 'S1', topic: 'Scope', text: 'Client: Acme' }]), [{ notebook: 'NP / S1 / Scope', wbs: 'S1', project: 'NP' }]);
   const s1 = rows(db, 'PROJWBS').find((w) => w.wbs_short_name === 'S1')!;
   assert.deepEqual(rows(db, 'WBSMEMO').map((m) => m.wbs_id), [s1.wbs_id], 'on the WBS element, not the root');
@@ -172,7 +172,7 @@ test('WBS notebooks, topic "*" and clear_notebooks (the anonymise op): every not
 
 test('update_baseline renames a baseline; in_baseline renames its activities, WBS and codes (renames only, a baseline only)', () => {
   const db: Db = { tables: {} };
-  ok(db, [{ op: 'add_project', id: 'ACME', start: '2026-03-02' }, { op: 'add_wbs', code: 'S1', name: 'Acme structure' }, { op: 'add_activity', id: 'A1', name: 'Acme pour', wbs: 'S1', duration_days: 1 }, { op: 'save_baseline', name: 'ACME-BL1', assign_as: 'project' }]);
+  ok(db, [{ op: 'add_project', currency: 'USD', id: 'ACME', start: '2026-03-02' }, { op: 'add_wbs', code: 'S1', name: 'Acme structure' }, { op: 'add_activity', id: 'A1', name: 'Acme pour', wbs: 'S1', duration_days: 1 }, { op: 'save_baseline', name: 'ACME-BL1', assign_as: 'project' }]);
   assert.deepEqual(ok(db, [{ op: 'update_baseline', baseline: 'ACME-BL1', new_name: 'P1 - B1', name: 'Baseline 1' }]), [{ baseline: 'P1 - B1', was: 'ACME-BL1' }]);
   const b = rows(db, 'PROJECT').find((p) => p._baseline_of)!;
   const broot = rows(db, 'PROJWBS').find((w) => w.proj_id === b.proj_id && w.proj_node_flag === 'Y')!;
@@ -197,7 +197,7 @@ test('update_baseline renames a baseline; in_baseline renames its activities, WB
 
 test('clear_descriptions blanks every description, notes and memo text (roles, cost accounts, resources...) and undoes', () => {
   const db: Db = { tables: {} };
-  ok(db, [{ op: 'add_project', id: 'P', start: '2026-03-02' }, { op: 'add_role', id: 'ENG', name: 'Engineer' }, { op: 'add_cost_account', id: 'CA1', name: 'Labour' }]);
+  ok(db, [{ op: 'add_project', currency: 'USD', id: 'P', start: '2026-03-02' }, { op: 'add_role', id: 'ENG', name: 'Engineer' }, { op: 'add_cost_account', id: 'CA1', name: 'Labour' }]);
   rows(db, 'ROLES')[0].role_descr = 'Secret role text';
   rows(db, 'ACCOUNT')[0].acct_descr = 'Secret account text';
   assert.deepEqual(ok(db, [{ op: 'clear_descriptions' }]), [{ cleared: { ROLES: 1, ACCOUNT: 1 } }]);

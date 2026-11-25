@@ -11,7 +11,7 @@ import { sampleCopy, testRoots } from './helpers.ts';
 testRoots();
 const call = async (name: string, args: Record<string, unknown>) => { const r = await callTool(name, args); return toolResult(r.out, r.isError, name).structuredContent as any; };
 async function project(ops: unknown[], start = '2021-02-01', schedule = true) {
-  const p = await call('new_project', { id: 'LV', start });
+  const p = await call('new_project', { currency: 'USD', id: 'LV', start });
   const e = await call('edit', { handle: p.handle, operations: ops });
   assert.ok(e.ok !== false && !e.error, JSON.stringify(e.error));
   if (schedule) assert.equal((await call('schedule', { handle: p.handle })).ok, true);
@@ -81,8 +81,8 @@ test('an edit of a leveled activity starts from its Start (the leveled one); a M
 });
 
 test('several projects: each moved activity carries its project, and activity_priority names one by {id, project}; Activity ID order is one order (A10 before A9, as P6 sorts the column)', async () => {
-  const p = await call('new_project', { id: 'P1', start: '2021-02-01' }), h = p.handle as string;
-  const e = await call('edit', { handle: h, operations: [R, act('B', 5), on('B'), { op: 'add_project', id: 'P2', start: '2021-02-01' }, { ...act('B', 5), project: 'P2' }, { ...on('B'), project: 'P2' }] });
+  const p = await call('new_project', { currency: 'USD', id: 'P1', start: '2021-02-01' }), h = p.handle as string;
+  const e = await call('edit', { handle: h, operations: [R, act('B', 5), on('B'), { op: 'add_project', currency: 'USD', id: 'P2', start: '2021-02-01' }, { ...act('B', 5), project: 'P2' }, { ...on('B'), project: 'P2' }] });
   assert.ok(!e.error, JSON.stringify(e.error));
   assert.equal((await call('schedule', { handle: h })).ok, true);
   const first = await call('level_resources', { handle: h, dry_run: true });

@@ -13,7 +13,7 @@ const call = async (name: string, args: Record<string, unknown>) => {
 
 test('4D M1: model, rules, links, status, quantities, keys, packages, sidecar (Duplex, IFC2X3)', async () => {
   const out = mkdtempSync(join(tmpdir(), 'p6-4d-'));
-  const np = (await call('new_project', { id: 'DUP', start: '2026-03-02' })).d;
+  const np = (await call('new_project', { currency: 'USD', id: 'DUP', start: '2026-03-02' })).d;
   const h = np.handle, owner_key = np.owner_key;
   const ops: unknown[] = [];
   for (const [id, name, d] of [['L1W', 'Level 1 walls', 10], ['L2W', 'Level 2 walls', 8], ['ROOF', 'Roof', 5], ['WIN', 'Windows', 4]] as const) ops.push({ op: 'add_activity', id, name, duration_days: d });
@@ -85,7 +85,7 @@ test('4D M1: model, rules, links, status, quantities, keys, packages, sidecar (D
 
 test('4D M1: IFC4 4D round trip (buildingSMART scheduling example): import task links, export them back', async () => {
   const out = mkdtempSync(join(tmpdir(), 'p6-4d-'));
-  const np = (await call('new_project', { id: 'BSI', start: '2026-03-02' })).d;
+  const np = (await call('new_project', { currency: 'USD', id: 'BSI', start: '2026-03-02' })).d;
   const h = np.handle, owner_key = np.owner_key;
   const ops: unknown[] = [];
   for (const n of ['Slab #1', 'Wall #1', 'Wall #2', 'Wall #3', 'Wall #4']) ops.push({ op: 'add_activity', id: n.replace(/\W/g, ''), name: n, duration_days: 2 });
@@ -102,7 +102,7 @@ test('4D M1: IFC4 4D round trip (buildingSMART scheduling example): import task 
   assert.equal(ex.err, false, JSON.stringify(ex.d));
   assert.equal(ex.d.tasks, 5);
   // the exported model carries the schedule: importing it again gives the same links
-  const np2 = (await call('new_project', { id: 'BSI2', start: '2026-03-02' })).d;
+  const np2 = (await call('new_project', { currency: 'USD', id: 'BSI2', start: '2026-03-02' })).d;
   await call('edit', { handle: np2.handle, owner_key: np2.owner_key, operations: ops });
   const file = ex.d.written.find((p: string) => p.endsWith('.ifc'));
   await call('open_model', { handle: np2.handle, owner_key: np2.owner_key, path: file, geometry: false });
@@ -113,7 +113,7 @@ test('4D M1: IFC4 4D round trip (buildingSMART scheduling example): import task 
 
 const VILLA = join(import.meta.dirname, '..', 'sample 4D', 'navisworks-real-2016-villa');
 test('4D M1: TimeLiner from a real 2016 Navisworks file (.nwf) and its Excel grid, as activities', { skip: !existsSync(join(VILLA, 'Ashraf_Navisworks.nwf')) && 'the villa files are kept out of the repository' }, async () => {
-  const np = (await call('new_project', { id: 'VILLA', start: '2016-02-01' })).d;
+  const np = (await call('new_project', { currency: 'USD', id: 'VILLA', start: '2016-02-01' })).d;
   const dry = await call('import_4d', { handle: np.handle, path: join(VILLA, 'Ashraf_Navisworks.nwf'), link: false, create_activities: true });
   assert.equal(dry.err, false, JSON.stringify(dry.d));
   assert.equal(dry.d.tasks, 12);

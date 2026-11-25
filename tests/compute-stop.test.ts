@@ -18,7 +18,7 @@ const call = async (name: string, args: Record<string, unknown>) => {
   return { err: r.isError, d: toolResult(r.out, r.isError).structuredContent as any };
 };
 const chain = async (n: number) => {
-  const np = (await call('new_project', { id: 'STOP', start: '2026-03-02' })).d;
+  const np = (await call('new_project', { currency: 'USD', id: 'STOP', start: '2026-03-02' })).d;
   const ops: unknown[] = [];
   for (let i = 0; i < n; i++) ops.push({ op: 'add_activity', id: `A${i}`, name: `A${i}`, duration_days: 3 }, ...(i ? [{ op: 'add_relationship', pred: `A${i - 1}`, succ: `A${i}` }] : []));
   await call('edit', { handle: np.handle, owner_key: np.owner_key, operations: ops });

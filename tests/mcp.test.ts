@@ -46,7 +46,7 @@ test('MCP: an agent builds, schedules, reviews, undoes, saves and reopens a proj
     const names = (await c.rpc('tools/list')).result.tools.map((t: { name: string }) => t.name);
     for (const n of ['open_file', 'new_project', 'edit', 'schedule', 'review', 'find_activities', 'get_activity', 'undo', 'save']) assert.ok(names.includes(n), n);
 
-    const { data: np } = await c.tool('new_project', { id: 'MCP1', name: 'Agent project', start: '2026-03-02' });
+    const { data: np } = await c.tool('new_project', { currency: 'USD', id: 'MCP1', name: 'Agent project', start: '2026-03-02' });
     const h = np.handle;
     const ed = await c.tool('edit', { handle: h, operations: [
       { op: 'add_activity', id: 'A1', name: 'Design', duration_days: 5 },
@@ -194,10 +194,10 @@ test('MCP: Microsoft Project task UIDs (source_uid, uid:), one data date per pro
   const c = client();
   try {
     await c.rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test', version: '1' } });
-    const h = (await c.tool('new_project', { id: 'P1', start: '2026-03-02' })).data.handle;
+    const h = (await c.tool('new_project', { currency: 'USD', id: 'P1', start: '2026-03-02' })).data.handle;
     assert.equal((await c.tool('edit', { handle: h, operations: [
       { op: 'add_activity', id: 'A1', name: 'One', duration_days: 5 }, { op: 'add_activity', id: 'A2', name: 'Two', duration_days: 3 }, { op: 'add_relationship', pred: 'A1', succ: 'A2' },
-      { op: 'add_project', id: 'P2', start: '2026-03-02' }, { op: 'add_activity', project: 'P2', id: 'B1', name: 'Other', duration_days: 5 },
+      { op: 'add_project', currency: 'USD', id: 'P2', start: '2026-03-02' }, { op: 'add_activity', project: 'P2', id: 'B1', name: 'Other', duration_days: 5 },
     ] })).isError, false);
     // a Microsoft Project file holds one project: refused without "project", written with it
     const dir = mkdtempSync(join(tmpdir(), 'p6mcp-'));
@@ -240,7 +240,7 @@ test('MCP: notifications/cancelled and cancel_job stop open_file, save and sched
     assert.equal(o.data.error.code, 'cancelled');
     assert.deepEqual([(await st()).open.length, (await st()).memory.projects_mb], [0, 0]);
 
-    const h = (await c.tool('new_project', { id: 'P1', start: '2026-03-02' })).data.handle;
+    const h = (await c.tool('new_project', { currency: 'USD', id: 'P1', start: '2026-03-02' })).data.handle;
     await c.tool('edit', { handle: h, operations: [{ op: 'add_activity', id: 'A1', name: 'One', duration_days: 5 }, { op: 'add_activity', id: 'A2', name: 'Two', duration_days: 3 }, { op: 'add_relationship', pred: 'A1', succ: 'A2' }] });
     const before = (await c.tool('get_activity', { handle: h, activity_id: 'A2' })).data;
     const sc = await c.cancelled('schedule', { handle: h, data_date: '2026-04-01' });
@@ -266,7 +266,7 @@ test('MCP: the lines of one read are handled in one turn, so a notifications/can
   // in-process: 60 pairs in one batch, over open_file, save and schedule
   const { handleLines } = await import('../mcp/stdio.ts');
   const { callTool, toolResult } = await import('../mcp/server.ts');
-  const h = (toolResult((await callTool('new_project', { id: 'RACE', start: '2026-03-02' })).out, false).structuredContent as any).handle;
+  const h = (toolResult((await callTool('new_project', { currency: 'USD', id: 'RACE', start: '2026-03-02' })).out, false).structuredContent as any).handle;
   await callTool('edit', { handle: h, operations: [{ op: 'add_activity', id: 'A1', name: 'One', duration_days: 5 }] });
   const out = mkdtempSync(join(tmpdir(), 'p6mcp-race-'));
   const answers = new Map<number, any>();

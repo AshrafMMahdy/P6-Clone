@@ -69,7 +69,7 @@ test('portfolio CRUD keeps definitions in the internal _PORTFOLIO table', () => 
   assert.throws(() => deletePortfolio(db, q.id), /not found/);
   assert.deepEqual(projectsIn(db, 'nope'), []);
   // portfolios are never written to XER
-  const text = new TextDecoder().decode(writeXer(db, { version: '19.12', encoding: 'utf-8' }));
+  const text = new TextDecoder().decode(writeXer(db, { version: '19.12', encoding: 'utf-8', currency: 'USD' }));
   assert.ok(!text.includes('_PORTFOLIO') && !text.includes('Tower Projects'));
 });
 

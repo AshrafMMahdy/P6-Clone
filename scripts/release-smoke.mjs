@@ -50,7 +50,7 @@ let status = await call('server_status', {});
 for (let k = 0; k < 150 && status.reasoner?.checking; k++) { await new Promise((r) => setTimeout(r, 200)); status = await call('server_status', {}); }
 if (!status.reasoner?.loaded) failures.push(`the reasoner did not load: ${JSON.stringify(status.reasoner)}`);
 
-const np = await call('new_project', { id: 'SMOKE', name: 'Release smoke', start: '2026-03-02' });
+const np = await call('new_project', { id: 'SMOKE', name: 'Release smoke', start: '2026-03-02', currency: 'EUR' });
 const { handle, owner_key } = np;
 const ops = [{ op: 'add_resource', id: 'crew', name: 'Crew', max_units_per_hour: 1 }];
 for (const [a, d] of [['A', 5], ['B', 4], ['C', 3], ['D', 6]]) ops.push({ op: 'add_activity', id: a, name: a, duration_days: d }, { op: 'assign_resource', activity: a, resource: 'crew', units_per_day: 8 });
@@ -81,7 +81,7 @@ for (const f of ['geomWorker.mjs', 'meshClosed.mjs', 'heartbeat.mjs', 'nwdWorker
 { const r = spawnSync(process.execPath, [join(folder, 'ifc', 'rvtWorker.mjs'), join(folder, 'ifc', 'rvtWorker.mjs'), join(tmpdir(), 'p6-smoke-rvt.ifc'), join(tmpdir(), 'p6-smoke-rvt.json')], { encoding: 'utf8' }); if (r.status !== 3 || !/magic bytes/.test(r.stderr)) failures.push(`ifc/rvtWorker.mjs did not load rvt-rs: ${r.status} ${r.stderr.slice(0, 200)}`); }
 if (!existsSync(ifcFixture)) failures.push(`no IFC fixture at ${ifcFixture}`);
 else {
-  const m4 = await call('new_project', { id: 'S4D', start: '2026-03-02' });
+  const m4 = await call('new_project', { id: 'S4D', start: '2026-03-02', currency: 'EUR' });
   const ops4 = ['Slab #1', 'Wall #1', 'Wall #2', 'Wall #3', 'Wall #4'].map((n) => ({ op: 'add_activity', id: n.replace(/\W/g, ''), name: n, duration_days: 2 }));
   await call('edit', { handle: m4.handle, owner_key: m4.owner_key, operations: ops4 });
   await call('schedule', { handle: m4.handle, owner_key: m4.owner_key });

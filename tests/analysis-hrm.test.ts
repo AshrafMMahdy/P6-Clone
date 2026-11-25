@@ -16,7 +16,7 @@ function project(cap: number): { db: Db; pid: string } {
   const spec: [number, number, number[]][] = [[1, 4, []], [2, 6, [1]], [3, 5, [2]], [4, 5, []], [5, 7, [4]], [6, 4, [5]], [7, 3, []], [8, 5, [7]], [9, 4, [3, 6]], [10, 6, [9, 8]], [11, 3, [10]], [12, 2, [11]]];
   const order = [...spec].sort((a, b) => a[0] - b[0]);
   const r = applyOps(db, [
-    { op: 'add_project', id: 'HRM', start: '2026-06-01' },
+    { op: 'add_project', currency: 'USD', id: 'HRM', start: '2026-06-01' },
     { op: 'add_resource', id: 'civil', name: 'Civil crew', max_units_per_hour: cap },
     ...order.flatMap(([id, d]) => A(id, d, [])),
     ...order.flatMap(([id, , preds]) => preds.map((p) => ({ op: 'add_relationship', pred: `A${p}`, succ: `A${id}` }))),
@@ -218,7 +218,7 @@ test('optimize_schedule runs the embedded model and checks its answer with the P
   assert.equal(c.crashable_activities, 1);
   // a plain project has nothing for the model to choose
   const empty: Db = { tables: {} };
-  applyOps(empty, [{ op: 'add_project', id: 'E', start: '2026-06-01' }, { op: 'add_activity', id: 'X', name: 'X', duration_days: 3 }]);
+  applyOps(empty, [{ op: 'add_project', currency: 'USD', id: 'E', start: '2026-06-01' }, { op: 'add_activity', id: 'X', name: 'X', duration_days: 3 }]);
   const e = await optimizeSchedule(empty, [rows(empty, 'PROJECT')[0].proj_id], {}, nodeInfer, apply);
   assert.equal(!e.ok && e.error.code, 'nothing_to_optimise');
 });
@@ -226,7 +226,7 @@ test('optimize_schedule runs the embedded model and checks its answer with the P
 test('MCP optimize_schedule: proposal, apply as one undoable change, min_crash_cost, clear errors', { skip: !reasonerModelPath() && 'models/reasoner.onnx is not present' }, async () => {
   const { callTool, toolResult } = await import('../mcp/server.ts');
   const call = async (name: string, args: Record<string, unknown>) => { const r = await callTool(name, args); return { err: r.isError, d: toolResult(r.out, r.isError).structuredContent as any }; };
-  const np = (await call('new_project', { id: 'OPT', start: '2026-06-01' })).d;
+  const np = (await call('new_project', { currency: 'USD', id: 'OPT', start: '2026-06-01' })).d;
   const h = np.handle, owner_key = np.owner_key;
   const ops: unknown[] = [{ op: 'add_resource', id: 'civil', name: 'Civil', max_units_per_hour: 4 }];
   for (const [id, d] of [['A', 4], ['B', 6], ['C', 5], ['D', 7], ['E', 3]] as const) ops.push({ op: 'add_activity', id, name: id, duration_days: d }, { op: 'assign_resource', activity: id, resource: 'civil', units_per_day: 16 });
@@ -373,7 +373,7 @@ test('apply writes the WHIQ fields beside each changed activity in the same undo
   const { setRoots } = await import('../mcp/runtime.ts');
   setRoots(null, tmpdir());
   const call = async (name: string, args: Record<string, unknown>) => { const r = await callTool(name, args); return { err: r.isError, d: toolResult(r.out, r.isError).structuredContent as any }; };
-  const np = (await call('new_project', { id: 'WQ', start: '2026-06-01' })).d, h = np.handle, owner_key = np.owner_key;
+  const np = (await call('new_project', { currency: 'USD', id: 'WQ', start: '2026-06-01' })).d, h = np.handle, owner_key = np.owner_key;
   // A (10 days) then B (5 days) in a chain, C (6 days) alone: A is critical and cheap to crash
   const ops: unknown[] = [{ op: 'add_resource', id: 'civil', name: 'Civil', max_units_per_hour: 20 }];
   for (const [id, d] of [['A', 10], ['B', 5], ['C', 6]] as const) ops.push({ op: 'add_activity', id, name: `Activity ${id}`, duration_days: d }, { op: 'assign_resource', activity: id, resource: 'civil', units_per_day: 16 });
@@ -398,10 +398,10 @@ test('apply writes the WHIQ fields beside each changed activity in the same undo
   assert.equal(ap.d.applied, true);
   const f1 = await fields();
   assert.deepEqual(f1.labels, ['WHIQ change note', 'WHIQ duration change (d)', 'WHIQ leveling rank', 'WHIQ original duration (d)']);
-  // A was crashed (10 to 6 d, cost 4,500); the fields are on the activities the run changed, the rank on every leveled one (all three)
+  // A was crashed (10 to 6 d, cost $4,500.00: the note says the cost in the file's currency); the fields are on the activities the run changed, the rank on every leveled one (all three)
   assert.equal(f1.values.A['WHIQ original duration (d)'], '10');
   assert.equal(f1.values.A['WHIQ duration change (d)'], '-4');
-  assert.match(f1.values.A['WHIQ change note'], /^Crashed by the schedule reasoner \d{4}-\d{2}-\d{2}: 10 d to 6 d, cost 4,500$/);
+  assert.match(f1.values.A['WHIQ change note'], /^Crashed by the schedule reasoner \d{4}-\d{2}-\d{2}: 10 d to 6 d, cost \$4,500\.00$/);
   assert.equal(f1.values.B['WHIQ change note'], undefined, 'B was not changed');
   assert.deepEqual(['A', 'B', 'C'].map((k) => Number(f1.values[k]['WHIQ leveling rank'])).sort(), [1, 2, 3]);
   const named = new Map((ap.d.fields_written as { name: string; activities: number }[]).map((x) => [x.name, x.activities]));
@@ -417,7 +417,7 @@ test('apply writes the WHIQ fields beside each changed activity in the same undo
   const f2 = await fields();
   assert.equal(f2.values.A['WHIQ original duration (d)'], '10', 'the original is written once: the second apply does not turn it into the crashed 6');
   assert.equal(f2.values.A['WHIQ duration change (d)'], '-7', 'the latest duration (3) minus the original (10)');
-  assert.match(f2.values.A['WHIQ change note'], /: 6 d to 3 d, cost 700 \(original 10 d\)$/);
+  assert.match(f2.values.A['WHIQ change note'], /: 6 d to 3 d, cost \$700\.00 \(original 10 d\)$/);
   const named2 = new Map((again.d.fields_written as { name: string; activities: number; kept_from_earlier: number }[]).map((x) => [x.name, x]));
   // the note and rank are the latest run's; A holds the original of the earlier run (kept, not written again)
   assert.deepEqual([named2.get('WHIQ change note')!.activities, named2.get('WHIQ change note')!.kept_from_earlier], [1, 0]);
@@ -436,14 +436,14 @@ test('apply writes the WHIQ fields beside each changed activity in the same undo
   const vals = (await call('read_table', { handle: re.handle, table: 'UDFVALUE' })).d;
   assert.ok(vals.rows.length >= 6);
   // crash_schedule's apply writes the same three (its first apply: no numbered field, no rank), noted as least-cost crashing
-  const np2 = (await call('new_project', { id: 'WQ2', start: '2026-06-01' })).d;
+  const np2 = (await call('new_project', { currency: 'USD', id: 'WQ2', start: '2026-06-01' })).d;
   await call('edit', { handle: np2.handle, owner_key: np2.owner_key, operations: [{ op: 'add_activity', id: 'X', name: 'X', duration_days: 10 }, { op: 'add_activity', id: 'Y', name: 'Y', duration_days: 5 }, { op: 'add_relationship', pred: 'X', succ: 'Y' }] });
   await call('schedule', { handle: np2.handle, owner_key: np2.owner_key });
   const cs = await call('crash_schedule', { handle: np2.handle, owner_key: np2.owner_key, target_days: 12, activities: [{ id: 'X', crash_days: 6, crash_cost: 400 }], apply: true });
   assert.equal(cs.err, false, JSON.stringify(cs.d));
   assert.deepEqual(cs.d.fields_written.map((x: any) => x.name), ['WHIQ original duration (d)', 'WHIQ duration change (d)', 'WHIQ change note']);
   const tv = (await call('read_table', { handle: np2.handle, table: 'UDFVALUE' })).d;
-  assert.ok(tv.rows.some((r: string[]) => r.some((c) => /^Crashed \(least cost\) \d{4}-\d{2}-\d{2}: 10 d to \d+(\.\d+)? d, cost [\d,.]+$/.test(c))), JSON.stringify(tv.rows).slice(0, 400));
+  assert.ok(tv.rows.some((r: string[]) => r.some((c) => /^Crashed \(least cost\) \d{4}-\d{2}-\d{2}: 10 d to \d+(\.\d+)? d, cost \$[\d,.]+$/.test(c))), JSON.stringify(tv.rows).slice(0, 400));
   assert.equal((await call('undo', { handle: np2.handle, owner_key: np2.owner_key })).err, false);
   assert.equal((await call('read_table', { handle: np2.handle, table: 'UDFVALUE' })).d.rows?.length ?? 0, 0, 'undo removes them');
 });
@@ -523,7 +523,7 @@ test('optimize_schedule max_priority: the order listed is as long as asked (defa
 
 test('the fields of a change are the hours actually written: 20 h on an 8 h day crashed from 3 rounded days to 2 is 2.5 d to 1.67 d', async () => {
   const db: Db = { tables: {} };
-  assert.ok(applyOps(db, [{ op: 'add_project', id: 'F', start: '2026-06-01' }, { op: 'add_activity', id: 'X', name: 'X', duration_days: 2.5 }], { calendarDays: true }).ok);
+  assert.ok(applyOps(db, [{ op: 'add_project', currency: 'USD', id: 'F', start: '2026-06-01' }, { op: 'add_activity', id: 'X', name: 'X', duration_days: 2.5 }], { calendarDays: true }).ok);
   const pid = rows(db, 'PROJECT')[0].proj_id;
   assert.ok(scheduleProjects(db, [pid]).ok);
   const r = await optimizeSchedule(db, [pid], { samples: 1, seed: 1, activities: [{ id: 'X', crash_days: 2, crash_cost: 10 }] }, async (x) => stand(Array.from({ length: x.n }, () => 0)), () => undefined);
@@ -536,7 +536,7 @@ test('the fields of a change are the hours actually written: 20 h on an 8 h day 
 test('whiqRunOps (the one rule of every apply): the original is written once, the change is measured from it, the note says so, and values of earlier runs on other activities are counted', async () => {
   const { whiqRunOps, whiqFieldClash } = await import('../core/analysis/whiq-fields.ts');
   const db: Db = { tables: {} };
-  assert.ok(applyOps(db, [{ op: 'add_project', id: 'W', start: '2026-06-01' }, ...['A', 'B'].map((id) => ({ op: 'add_activity', id, name: id, duration_days: 10 }))], { calendarDays: true }).ok);
+  assert.ok(applyOps(db, [{ op: 'add_project', currency: 'USD', id: 'W', start: '2026-06-01' }, ...['A', 'B'].map((id) => ({ op: 'add_activity', id, name: id, duration_days: 10 }))], { calendarDays: true }).ok);
   const task = (code: string) => rows(db, 'TASK').find((t) => t.task_code === code)!.task_id;
   const run = (changes: { id: string; from: number; to: number }[], ranks: string[]) => {
     assert.ok(applyOps(db, changes.map((c) => ({ op: 'update_activity', id: c.id, duration_days: c.to })), { calendarDays: true }).ok); // (the run's own durations are in before its fields are written)
@@ -550,7 +550,7 @@ test('whiqRunOps (the one rule of every apply): the original is written once, th
   assert.equal(value('A', 'WHIQ original duration (d)'), '10');
   assert.equal(value('A', 'WHIQ run 1 duration (d)'), '6', 'the second apply is run 2: the number it replaced');
   assert.equal(value('A', 'WHIQ duration change (d)'), '-7');
-  assert.equal(value('A', 'WHIQ change note'), 'Crashed 2026-11-10: 6 d to 3 d, cost 5 (original 10 d)');
+  assert.equal(value('A', 'WHIQ change note'), 'Crashed 2026-11-10: 6 d to 3 d, cost $5.00 (original 10 d)');
   // a rank the latest run does not give is removed (the run gave ranks: the reasoner's); B's is the latest
   assert.equal(value('A', 'WHIQ leveling rank'), undefined);
   assert.equal(value('B', 'WHIQ leveling rank'), '1');
@@ -567,7 +567,7 @@ test('whiqRunOps (the one rule of every apply): the original is written once, th
 test('A-L2: kept_from_earlier counts the values on the activities of the run’s projects only, not those of other projects in the file', async () => {
   const { whiqRunOps } = await import('../core/analysis/whiq-fields.ts');
   const db: Db = { tables: {} };
-  assert.ok(applyOps(db, [{ op: 'add_project', id: 'W', start: '2026-06-01' }, { op: 'add_project', id: 'X', start: '2026-06-01' },
+  assert.ok(applyOps(db, [{ op: 'add_project', currency: 'USD', id: 'W', start: '2026-06-01' }, { op: 'add_project', currency: 'USD', id: 'X', start: '2026-06-01' },
     ...['A', 'B'].map((id) => ({ op: 'add_activity', project: 'W', id, name: id, duration_days: 10 })), ...['A', 'B', 'C'].map((id) => ({ op: 'add_activity', project: 'X', id, name: id, duration_days: 10 }))], { calendarDays: true }).ok);
   const pid = (n: string) => rows(db, 'PROJECT').find((p) => p.proj_short_name === n)!.proj_id;
   const task = (proj: string, code: string) => rows(db, 'TASK').find((t) => t.task_code === code && t.proj_id === pid(proj))!.task_id;
@@ -585,7 +585,7 @@ test('A-L2: kept_from_earlier counts the values on the activities of the run’s
 test('MCP optimize_schedule and crash_schedule apply: a field of another type with a WHIQ label refuses the apply before anything changes; a cancel just before the change applies nothing', { skip: !reasonerModelPath() && 'models/reasoner.onnx is not present' }, async () => {
   const { callTool, toolResult } = await import('../mcp/server.ts');
   const call = async (name: string, args: Record<string, unknown>, signal?: AbortSignal) => { const r = await callTool(name, args, undefined, signal); return { err: r.isError, d: toolResult(r.out, r.isError).structuredContent as any }; };
-  const np = (await call('new_project', { id: 'CL', start: '2026-06-01' })).d, h = np.handle, owner_key = np.owner_key;
+  const np = (await call('new_project', { currency: 'USD', id: 'CL', start: '2026-06-01' })).d, h = np.handle, owner_key = np.owner_key;
   const ops: unknown[] = [{ op: 'add_resource', id: 'civil', name: 'Civil', max_units_per_hour: 20 }];
   for (const [id, d] of [['A', 10], ['B', 5], ['C', 6]] as const) ops.push({ op: 'add_activity', id, name: `Activity ${id}`, duration_days: d }, { op: 'assign_resource', activity: id, resource: 'civil', units_per_day: 16 });
   ops.push({ op: 'add_relationship', pred: 'A', succ: 'B' }, { op: 'add_udf', name: 'WHIQ change note', data_type: 'number' });

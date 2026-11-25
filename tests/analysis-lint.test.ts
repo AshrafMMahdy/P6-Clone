@@ -15,7 +15,7 @@ const pid = (db: Db) => rows(db, 'PROJECT').find((p) => !p._baseline_of)!.proj_i
 function build(): Db {
   const db: Db = { tables: {} };
   ok(db, [
-    { op: 'add_project', id: 'L', start: '2026-03-02' },
+    { op: 'add_project', currency: 'USD', id: 'L', start: '2026-03-02' },
     { op: 'add_wbs', code: 'STR', name: 'Structure' }, { op: 'add_wbs', code: 'EMPTY', name: 'Nothing here' },
     { op: 'add_activity', id: 'S', name: 'Start', type: 'start_milestone' },
     { op: 'add_activity', id: 'A', name: 'Excavate', duration_days: 5, wbs: 'STR' },
@@ -132,7 +132,7 @@ test('schedule log as data: F9 sections plus invalid milestone links, critical, 
 
 test('lint fs_overlap: every ladder is simulated and listed by default (more than 10); a max_targets given is still honoured', () => {
   const db: Db = { tables: {} };
-  const ops: unknown[] = [{ op: 'add_project', id: 'LD', start: '2026-03-02' }, { op: 'add_activity', id: 'S', name: 'Start', type: 'start_milestone' }, { op: 'add_activity', id: 'H', name: 'Finish', type: 'finish_milestone' }];
+  const ops: unknown[] = [{ op: 'add_project', currency: 'USD', id: 'LD', start: '2026-03-02' }, { op: 'add_activity', id: 'S', name: 'Start', type: 'start_milestone' }, { op: 'add_activity', id: 'H', name: 'Finish', type: 'finish_milestone' }];
   const groups = 'ABCDEFGHIJKL'; // twelve ladders in series, all critical (names differ by letters: digits are masked in the look-alike match)
   let prev = 'S';
   for (const g of groups) for (let n = 1; n <= 4; n++) { const id = `${g}${n}`; ops.push({ op: 'add_activity', id, name: `Zone ${g} pour ${n}`, duration_days: 5 }, { op: 'add_relationship', pred: prev, succ: id }); prev = id; }
@@ -152,7 +152,7 @@ test('lint fs_overlap: every ladder is simulated and listed by default (more tha
 /** n critical ladders in series; ladder k has sizes[k] activities (names differ by letters: digits are masked in the look-alike match) */
 function ladders(sizes: number[]): Db {
   const db: Db = { tables: {} };
-  const ops: unknown[] = [{ op: 'add_project', id: 'LT', start: '2026-03-02' }, { op: 'add_activity', id: 'S', name: 'Start', type: 'start_milestone' }, { op: 'add_activity', id: 'H', name: 'Finish', type: 'finish_milestone' }];
+  const ops: unknown[] = [{ op: 'add_project', currency: 'USD', id: 'LT', start: '2026-03-02' }, { op: 'add_activity', id: 'S', name: 'Start', type: 'start_milestone' }, { op: 'add_activity', id: 'H', name: 'Finish', type: 'finish_milestone' }];
   let prev = 'S';
   sizes.forEach((size, k) => { for (let n = 1; n <= size; n++) { const id = `L${k}_${n}`; ops.push({ op: 'add_activity', id, name: `Zone ${String.fromCharCode(65 + (k % 26))}${String.fromCharCode(65 + Math.floor(k / 26))} pour ${n}`, duration_days: 5 }, { op: 'add_relationship', pred: prev, succ: id }); prev = id; } });
   ops.push({ op: 'add_relationship', pred: prev, succ: 'H' });
@@ -214,7 +214,7 @@ test('MCP lint: cancelled while simulating every critical ladder it answers what
   const desc = String((toolsList() as any[]).find((t) => t.name === 'lint').description);
   assert.match(desc, /by default every critical ladder is simulated/); assert.match(desc, /simulate: false skips/); assert.match(desc, /first N critical ladders, the largest by number of activities first/);
   assert.doesNotMatch(desc, /save most/);
-  const np = (await call('new_project', { id: 'LTC', start: '2026-03-02' })).d;
+  const np = (await call('new_project', { currency: 'USD', id: 'LTC', start: '2026-03-02' })).d;
   const sizes = Array(160).fill(4); // 160 critical ladders in series
   const ops: unknown[] = [{ op: 'add_activity', id: 'S', name: 'Start', type: 'start_milestone' }, { op: 'add_activity', id: 'H', name: 'Finish', type: 'finish_milestone' }];
   let prev = 'S';

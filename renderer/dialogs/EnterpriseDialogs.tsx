@@ -1,5 +1,6 @@
 // Enterprise dictionaries (calendars, codes, UDFs, OBS, cost accounts, roles, currencies) and
 // view/tools dialogs (leveling, filters, timescale, layouts, page setup).
+import { baseCurrency, formatMoney } from '../../core/currency.ts';
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { Dialog, Tabs } from '../components/Layout.tsx';
 import { closeDialog, doUndo, getUi, mutate, openDialog, setUi, toast, useStore, DEFAULT_COLUMNS, type UiState } from '../store.ts';
@@ -780,7 +781,6 @@ export function AccountsDialog() {
   const accts = rows(db, 'ACCOUNT');
   const items = treeOrder(accts, 'acct_id', 'parent_acct_id', 'acct_seq_num', 'acct_short_name', collapsed);
   const cur = accts.find((a) => a.acct_id === sel);
-  const sym = rows(db, 'CURRTYPE')[0]?.curr_symbol ?? '$';
 
   const { own, total, usage } = useMemo(() => {
     const own = new Map<string, number>();
@@ -837,8 +837,8 @@ export function AccountsDialog() {
           }} />,
           <Cell value={a.acct_name} onCommit={(v) => setField('Rename Cost Account', 'ACCOUNT', 'acct_id', a.acct_id, 'acct_name', v)} />,
           <Cell value={a.acct_descr ?? ''} onCommit={(v) => setField('Edit Cost Account', 'ACCOUNT', 'acct_id', a.acct_id, 'acct_descr', v)} />,
-          <span style={{ display: 'block', textAlign: 'right' }}>{sym}{money(own.get(a.acct_id) ?? 0)}</span>,
-          <span style={{ display: 'block', textAlign: 'right', fontWeight: 'bold' }}>{sym}{money(total.get(a.acct_id) ?? 0)}</span>,
+          <span style={{ display: 'block', textAlign: 'right' }}>{formatMoney(db, own.get(a.acct_id) ?? 0)}</span>,
+          <span style={{ display: 'block', textAlign: 'right', fontWeight: 'bold' }}>{formatMoney(db, total.get(a.acct_id) ?? 0)}</span>,
         ]} />
       <div className="muted" style={{ marginTop: 4 }}>Budget = sum of budgeted cost of expenses (PROJCOST) and resource assignments (TASKRSRC) charged to the account; total includes child accounts.</div>
     </Dialog>
@@ -858,7 +858,7 @@ export function RolesDialog() {
   const roles = rows(db, 'ROLES');
   const items = treeOrder(roles, 'role_id', 'parent_role_id', 'seq_num', 'role_short_name', collapsed);
   const cur = roles.find((r) => r.role_id === sel);
-  const sym = rows(db, 'CURRTYPE')[0]?.curr_symbol ?? '$';
+  const sym = baseCurrency(db)?.curr_symbol;   // the file's base currency (core/currency.ts)
   const priceOf = (id: string) => rows(db, 'ROLERATE').find((r) => r.role_id === id)?.cost_per_qty ?? '';
 
   const add = (parent: string) => {
@@ -902,7 +902,7 @@ export function RolesDialog() {
       <button className="btn primary" onClick={closeDialog}>Close</button>
     </>}>
       <TreeTable items={items} idField="role_id" sel={sel} onSel={setSel} collapsed={collapsed} onToggle={(id) => setCollapsed((c) => ({ ...c, [id]: !c[id] }))}
-        headers={[['Role ID', 200], ['Role Name'], [`Price / Unit (${sym})`, 110], ['Resources', 70]]} height="calc(100% - 20px)" empty="No roles. Click Add Root."
+        headers={[['Role ID', 200], ['Role Name'], [`Price / Unit${sym ? ` (${sym})` : ''}`, 110], ['Resources', 70]]} height="calc(100% - 20px)" empty="No roles. Click Add Root."
         cells={(r) => [
           <Cell value={r.role_short_name} onCommit={(v) => {
             if (!v.trim()) return toast('Role ID is required.');

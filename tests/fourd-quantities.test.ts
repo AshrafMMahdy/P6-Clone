@@ -15,7 +15,7 @@ const call = async (name: string, args: Record<string, unknown>) => {
   return { err: r.isError, d: toolResult(r.out, r.isError).structuredContent as any };
 };
 async function model(path: string) {
-  const np = (await call('new_project', { id: `Q${Math.random().toString(36).slice(2, 7)}`, start: '2026-03-02' })).d;
+  const np = (await call('new_project', { currency: 'USD', id: `Q${Math.random().toString(36).slice(2, 7)}`, start: '2026-03-02' })).d;
   const om = await call('open_model', { handle: np.handle, owner_key: np.owner_key, path });
   assert.equal(om.err, false, JSON.stringify(om.d).slice(0, 300));
   const q = (args: Record<string, unknown> = {}) => call('quantities', { handle: np.handle, ...args });

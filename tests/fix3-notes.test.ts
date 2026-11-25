@@ -16,7 +16,7 @@ const W = mkdtempSync(join(tmpdir(), 'p6-fix3-'));
 setRoots(join(import.meta.dirname, '..'), W);
 const call = async (name: string, args: Record<string, unknown>) => { const r = await callTool(name, args); return toolResult(r.out, r.isError, name).structuredContent as any; };
 async function built(start: string, ops: unknown[], id = 'P'): Promise<string> {
-  const p = await call('new_project', { id, start });
+  const p = await call('new_project', { currency: 'USD', id, start });
   const e = await call('edit', { handle: p.handle, operations: ops });
   assert.ok(e.ok !== false && !e.error, JSON.stringify(e));
   return p.handle;
@@ -56,7 +56,7 @@ test('4: compute_schedule with a loop says the links left out once, with no unme
   for (const n of names) assert.ok(!notes.some((x) => x.startsWith(`${n} is not met`)), `${n}: ${JSON.stringify(notes)}`);
   // a project: schedule keeps the sentence (its dates are saved, the logic is not)
   const db: Db = { tables: {} };
-  assert.equal(applyOps(db, [{ op: 'add_project', id: 'L', start: '2026-01-05' }, act('A', 2), act('B', 2), act('C', 2), rel('A', 'B'), rel('B', 'C')]).ok, true);
+  assert.equal(applyOps(db, [{ op: 'add_project', currency: 'USD', id: 'L', start: '2026-01-05' }, act('A', 2), act('B', 2), act('C', 2), rel('A', 'B'), rel('B', 'C')]).ok, true);
   const T = rows(db, 'TASK'), id = (c: string) => T.find((t) => t.task_code === c)!.task_id;
   db.tables.TASKPRED.rows.push({ ...db.tables.TASKPRED.rows[0], task_pred_id: '99', pred_task_id: id('C'), task_id: id('A') });
   const path = join(W, 'loop.xer');
@@ -244,7 +244,7 @@ test('13: updates are named by Project ID and data date (never a handle or a tem
   const ct = await call('change_tracking', { handle: b, updates: [{ handle: a }] });
   assert.doesNotMatch(noFiles(ct), /h_[A-Za-z0-9_-]{6,}|\/tmp\/|p6-fix3/);
   // an empty project: no table or column name, no false advice
-  const e = await call('new_project', { id: 'EMPTY', start: '2026-01-05' });
+  const e = await call('new_project', { currency: 'USD', id: 'EMPTY', start: '2026-01-05' });
   const v = await call('validate', { handle: e.handle });
   const said = v.findings.map((f: any) => f.message).join(' ');
   assert.doesNotMatch(said, /TASK|task_id|lenient/);

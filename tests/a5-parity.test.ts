@@ -25,7 +25,7 @@ const NET = [
 ];
 /** The same network through new_project + edit + schedule. */
 async function handleFor(acts = NET, extra: unknown[] = []) {
-  const h = (await call('new_project', { id: 'P', start: '2026-03-02' })).handle;
+  const h = (await call('new_project', { currency: 'USD', id: 'P', start: '2026-03-02' })).handle;
   const ops: unknown[] = acts.map(({ predecessors: _p, ...a }) => ({ op: 'add_activity', name: a.id, ...a }));
   for (const a of acts) for (const p of (a as any).predecessors ?? []) ops.push({ op: 'add_relationship', pred: p.id, succ: a.id, type: p.type, lag_days: p.lag_days });
   const e = await call('edit', { handle: h, operations: [...ops, ...extra] });
@@ -95,7 +95,7 @@ test('G-2 compute_schedule: no handle; the same rows as a project built and sche
 
 test('G-3 set_schedule_options writes P6\'s Schedule Options; schedule options override one run; new_project must_finish_by', async () => {
   const db: Db = { tables: {} };
-  const r = applyOps(db, [{ op: 'add_project', id: 'P', start: '2026-03-02' }, { op: 'set_schedule_options', logic: 'override', lag_calendar: '24h', float_type: 'smallest', critical: 'longest_path', critical_float_days: 2, open_ended_critical: true, use_expected_finish: false, ignore_external: true, ss_lag_from_actual_start: true }]);
+  const r = applyOps(db, [{ op: 'add_project', currency: 'USD', id: 'P', start: '2026-03-02' }, { op: 'set_schedule_options', logic: 'override', lag_calendar: '24h', float_type: 'smallest', critical: 'longest_path', critical_float_days: 2, open_ended_critical: true, use_expected_finish: false, ignore_external: true, ss_lag_from_actual_start: true }]);
   assert.equal(r.ok, true, JSON.stringify(r.error));
   const so = rows(db, 'SCHEDOPTIONS')[0], p = rows(db, 'PROJECT')[0];
   assert.deepEqual([so.sched_progress_override, so.sched_retained_logic, so.sched_calendar_on_relationship_lag, so.sched_float_type, so.sched_open_critical_flag, so.sched_use_expect_end_flag, so.sched_outer_depend_type, so.sched_lag_early_start_flag, p.critical_path_type, p.critical_drtn_hr_cnt],
@@ -107,7 +107,7 @@ test('G-3 set_schedule_options writes P6\'s Schedule Options; schedule options o
   assert.match(applyOps(db, [{ op: 'set_schedule_options', colour: 'red' }]).error!.message, /Unknown schedule option "colour"/);
   assert.match(applyOps(db, [{ op: 'set_schedule_options' }]).error!.message, /at least one schedule option/);
   // MCP: one run with other options leaves the project's as they were
-  const h = (await call('new_project', { id: 'Q', start: '2026-03-02', must_finish_by: '2026-03-31' })).handle;
+  const h = (await call('new_project', { currency: 'USD', id: 'Q', start: '2026-03-02', must_finish_by: '2026-03-31' })).handle;
   await call('edit', { handle: h, operations: [{ op: 'add_activity', id: 'A', name: 'A', duration_days: 5 }, { op: 'add_activity', id: 'B', name: 'B', duration_days: 1 }, { op: 'add_relationship', pred: 'A', succ: 'B', lag_hours: 24 }] });
   const startB = async (args: Record<string, unknown> = {}) => { await call('schedule', { handle: h, ...args }); return (await call('get_activity', { handle: h, activity_id: 'B' })).start; };
   assert.equal(await startB(), '2026-03-12 08:00'); // 24 working hours on the predecessor's calendar
@@ -129,7 +129,7 @@ test('G-4 one relationship per pair and type for XER / P6 (SS + FF pairs kept th
   // saved and opened again: both kept
   const path = join(dir, 'pairs.xer');
   const db: Db = { tables: {} };
-  assert.equal(applyOps(db, [{ op: 'add_project', id: 'P', start: '2026-03-02' }, { op: 'add_activity', id: 'A', name: 'A' }, { op: 'add_activity', id: 'B', name: 'B' }, { op: 'add_relationship', pred: 'A', succ: 'B', type: 'SS', lag_days: 2 }, { op: 'add_relationship', pred: 'A', succ: 'B', type: 'FF' }]).ok, true);
+  assert.equal(applyOps(db, [{ op: 'add_project', currency: 'USD', id: 'P', start: '2026-03-02' }, { op: 'add_activity', id: 'A', name: 'A' }, { op: 'add_activity', id: 'B', name: 'B' }, { op: 'add_relationship', pred: 'A', succ: 'B', type: 'SS', lag_days: 2 }, { op: 'add_relationship', pred: 'A', succ: 'B', type: 'FF' }]).ok, true);
   writeFileSync(path, writeXer(db, { version: '19.12' }));
   const re = await call('open_file', { path });
   assert.deepEqual((await call('get_activity', { handle: re.handle, activity_id: 'B' })).predecessors.map((p: any) => `${p.type} ${p.lag_days}`).sort(), ['FF 0', 'SS 2']);
@@ -144,7 +144,7 @@ test('G-4 one relationship per pair and type for XER / P6 (SS + FF pairs kept th
 
 test('G-5 assign_resource allow_duplicate: the same resource twice on an activity', () => {
   const db: Db = { tables: {} };
-  const base = [{ op: 'add_project', id: 'P', start: '2026-03-02' }, { op: 'add_activity', id: 'A', name: 'A', duration_days: 5 }, { op: 'add_resource', id: 'CREW' }, { op: 'assign_resource', activity: 'A', resource: 'CREW', units: 10 }];
+  const base = [{ op: 'add_project', currency: 'USD', id: 'P', start: '2026-03-02' }, { op: 'add_activity', id: 'A', name: 'A', duration_days: 5 }, { op: 'add_resource', id: 'CREW' }, { op: 'assign_resource', activity: 'A', resource: 'CREW', units: 10 }];
   assert.equal(applyOps(db, base).ok, true);
   assert.match(applyOps(db, [{ op: 'assign_resource', activity: 'A', resource: 'CREW', units: 5 }]).error!.message, /already assigned to A \(allow_duplicate: true adds a second assignment\)/);
   const r = applyOps(db, [{ op: 'assign_resource', activity: 'A', resource: 'CREW', units: 5, allow_duplicate: true }]);
@@ -154,7 +154,7 @@ test('G-5 assign_resource allow_duplicate: the same resource twice on an activit
 
 test('G-9 schedule: loops listed either way; break_loops leaves out the links that close them (they stay in the project)', async () => {
   const db: Db = { tables: {} };
-  assert.equal(applyOps(db, [{ op: 'add_project', id: 'L', start: '2026-03-02' }, ...['A', 'B', 'C', 'D'].map((id) => ({ op: 'add_activity', id, name: id, duration_days: 2 })), { op: 'add_relationship', pred: 'A', succ: 'B' }, { op: 'add_relationship', pred: 'B', succ: 'C' }, { op: 'add_relationship', pred: 'C', succ: 'D' }]).ok, true);
+  assert.equal(applyOps(db, [{ op: 'add_project', currency: 'USD', id: 'L', start: '2026-03-02' }, ...['A', 'B', 'C', 'D'].map((id) => ({ op: 'add_activity', id, name: id, duration_days: 2 })), { op: 'add_relationship', pred: 'A', succ: 'B' }, { op: 'add_relationship', pred: 'B', succ: 'C' }, { op: 'add_relationship', pred: 'C', succ: 'D' }]).ok, true);
   const T = rows(db, 'TASK'), id = (c: string) => T.find((t) => t.task_code === c)!.task_id;
   // a loop C -> A, as files from other tools carry (the edit itself refuses one)
   assert.match(applyOps(structuredClone(db), [{ op: 'add_relationship', pred: 'C', succ: 'A' }]).error!.message, /would create a loop/);
@@ -168,7 +168,7 @@ test('G-9 schedule: loops listed either way; break_loops leaves out the links th
   const yes = await call('schedule', { handle: o.handle, break_loops: true });
   assert.deepEqual([yes.ok, yes.loops.map((x: string[]) => [...x].sort()), yes.broken_links], [true, [['A', 'B', 'C']], [{ pred: 'C', succ: 'A', type: 'FS' }]]);
   assert.equal((await call('get_activity', { handle: o.handle, activity_id: 'A' })).predecessors.length, 1, 'the link stays in the project');
-  assert.deepEqual((await call('schedule', { handle: (await call('new_project', { id: 'N', start: '2026-03-02' })).handle })).loops, []);
+  assert.deepEqual((await call('schedule', { handle: (await call('new_project', { currency: 'USD', id: 'N', start: '2026-03-02' })).handle })).loops, []);
 });
 
 test('G-13 a JWM-sized build (3,560 WBS, 11,426 activities, 32,407 relationships with SS+FF pairs, 3,393 assignments) applies in one edit in seconds; a loop names the first link that closed it', () => {
@@ -177,7 +177,7 @@ test('G-13 a JWM-sized build (3,560 WBS, 11,426 activities, 32,407 relationships
   const byW = new Map(t('PROJWBS').map((w) => [w.wbs_id, w]));
   const path = (id: string): string => { const w = byW.get(id); if (!w || w.proj_node_flag === 'Y') return ''; const p = path(w.parent_wbs_id); return p ? `${p}.${w.wbs_short_name}` : w.wbs_short_name; };
   const depth = (id: string): number => { const w = byW.get(id); return !w || w.proj_node_flag === 'Y' ? 0 : 1 + depth(w.parent_wbs_id); };
-  const ops: Record<string, unknown>[] = [{ op: 'add_project', id: 'JWM', start: '2020-01-01' }];
+  const ops: Record<string, unknown>[] = [{ op: 'add_project', currency: 'USD', id: 'JWM', start: '2020-01-01' }];
   for (const w of t('PROJWBS').filter((x) => x.proj_node_flag !== 'Y').sort((a, b) => depth(a.wbs_id) - depth(b.wbs_id))) { const pp = path(w.parent_wbs_id); ops.push({ op: 'add_wbs', code: w.wbs_short_name, name: w.wbs_name || w.wbs_short_name, ...(pp ? { parent: pp } : {}) }); }
   const code = new Map(t('TASK').map((x) => [x.task_id, x.task_code]));
   for (const x of t('TASK')) { const wp = path(x.wbs_id); ops.push({ op: 'add_activity', id: x.task_code, name: x.task_name || x.task_code, ...(wp ? { wbs: wp } : {}), duration_hours: Number(x.target_drtn_hr_cnt) || 0 }); }
@@ -195,7 +195,7 @@ test('G-13 a JWM-sized build (3,560 WBS, 11,426 activities, 32,407 relationships
   // two loops closed in one edit: the error names the first operation that closed one
   const [a, b, c] = ['A1', 'A2', 'A3'];
   const small: Db = { tables: {} };
-  const e = applyOps(small, [{ op: 'add_project', id: 'S', start: '2026-03-02' }, ...[a, b, c].map((id) => ({ op: 'add_activity', id, name: id })),
+  const e = applyOps(small, [{ op: 'add_project', currency: 'USD', id: 'S', start: '2026-03-02' }, ...[a, b, c].map((id) => ({ op: 'add_activity', id, name: id })),
     { op: 'add_relationship', pred: a, succ: b }, { op: 'add_relationship', pred: b, succ: c }, { op: 'add_relationship', pred: b, succ: a }, { op: 'add_relationship', pred: c, succ: a }]);
   assert.deepEqual([e.ok, e.error!.index, e.error!.message], [false, 6, 'This relationship would create a loop (circular logic).']);
   assert.equal(small.tables.TASKPRED?.rows.length ?? 0, 0, 'nothing applied');

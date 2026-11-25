@@ -39,7 +39,7 @@ test('a 31,000-operation edit (20,000 assign_code) stays linear in time and memo
     const heap = () => { gc(); gc(); return process.memoryUsage().heapUsed; };
     const db = { tables: {} };
     const N = 2000, TYPES = 10;
-    const base = [{ op: 'add_project', id: 'BIG', start: '2026-03-02' }, { op: 'add_resource', id: 'R' }, { op: 'add_udf', name: 'Zone' }];
+    const base = [{ op: 'add_project', currency: 'USD', id: 'BIG', start: '2026-03-02' }, { op: 'add_resource', id: 'R' }, { op: 'add_udf', name: 'Zone' }];
     for (let i = 0; i < N; i++) base.push({ op: 'add_activity', id: 'A' + i, name: 'Activity ' + i, duration_days: 2 });
     for (let k = 0; k < TYPES; k++) base.push({ op: 'add_code_type', name: 'T' + k, values: Array.from({ length: 20 }, (_, v) => ({ code: 'V' + v })) });
     if (!applyOps(db, base).ok) throw new Error('base');

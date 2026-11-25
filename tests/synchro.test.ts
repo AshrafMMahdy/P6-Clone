@@ -260,7 +260,7 @@ test('length_unit on a SYNCHRO project: its objects and its paths placed by the 
   writeFileSync(unit2, await withTable(readFileSync(paths3d), '3DWorldSettings', (raw) => { const b = Buffer.from(raw); b.writeUInt32LE(2, 4 + 8 + 16 + 8); return b; }));
   const lift = (r: { d: any }) => r.d.paths.find((p: { name: string }) => p.name === 'Crane 2 - Podium Lift').keyframes[0].position_m;
   const assumed = (r: { d: any }) => r.d.notes.some((n: string) => /taken as metres \(assumed/.test(n));
-  const np = (await call('new_project', { id: 'SLU', start: '2018-07-02' })).d, h = np.handle, owner_key = np.owner_key;
+  const np = (await call('new_project', { currency: 'USD', id: 'SLU', start: '2018-07-02' })).d, h = np.handle, owner_key = np.owner_key;
   // as the file is read: its numbers taken as metres, said
   const a = await call('open_model', { handle: h, owner_key, path: unit2, geometry: false });
   assert.equal(a.err, false, JSON.stringify(a.d).slice(0, 400));

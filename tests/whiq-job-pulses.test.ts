@@ -18,7 +18,7 @@ test('a job sends progress pulses and one end pulse (notifications/job)', { time
   const call = async (name: string, args: Record<string, unknown>) => (await rpc('tools/call', { name, arguments: args })).result.structuredContent;
   try {
     await rpc('initialize', {});
-    const np = await call('new_project', { id: 'PULSE', start: '2026-03-02' });
+    const np = await call('new_project', { currency: 'USD', id: 'PULSE', start: '2026-03-02' });
     const ops: unknown[] = [];
     for (let i = 1; i <= 40; i++) ops.push({ op: 'add_activity', id: `A${i}`, name: `Activity ${i}`, duration_days: 5 + (i % 7) });
     for (let i = 1; i < 40; i++) ops.push({ op: 'add_relationship', pred: `A${i}`, succ: `A${i + 1}` });

@@ -13,7 +13,7 @@ test('a moved recovery folder is adopted from its new place (paths in its index 
   const rt = await import('../mcp/runtime.ts');
   const { callTool, toolResult } = await import('../mcp/server.ts');
   rt.setRoot(root1);
-  const np = toolResult((await callTool('new_project', { id: 'MOVED', start: '2026-03-02' })).out, false).structuredContent as any;
+  const np = toolResult((await callTool('new_project', { currency: 'USD', id: 'MOVED', start: '2026-03-02' })).out, false).structuredContent as any;
   await callTool('edit', { handle: np.handle, owner_key: np.owner_key, operations: [{ op: 'add_activity', id: 'M1', name: 'Kept across the move', duration_days: 3 }] });
   rt.checkpointAll();
   // the host moves it: copied into another process's root; its owner is gone

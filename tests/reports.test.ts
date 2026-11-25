@@ -20,7 +20,7 @@ const cairo = () => parseXer(new Uint8Array(readFileSync(join(SAMPLES_DIR, 'cair
 test('earned value follows P6: baseline budget, planned value at the data date, earned value from % complete', () => {
   const db = emptyDb();
   const r = applyOps(db, [
-    { op: 'add_project', id: 'EV', start: '2027-03-01' },
+    { op: 'add_project', currency: 'USD', id: 'EV', start: '2027-03-01' },
     { op: 'add_resource', id: 'CREW', type: 'labor', units_per_day: 8, price_per_unit: 10 },
     { op: 'add_activity', id: 'A', name: 'Work', duration_days: 10 },
     { op: 'assign_resource', activity: 'A', resource: 'CREW', units: 80 },

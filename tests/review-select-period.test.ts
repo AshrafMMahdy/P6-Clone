@@ -14,7 +14,7 @@ import { SAMPLES_DIR } from './helpers.ts';
 const ok = (db: Db, ops: unknown[]) => { const r = applyOps(db, ops, { calendarDays: true }); assert.equal(r.ok, true, JSON.stringify(r.error)); return r; };
 const small = (n: number): Db => {
   const db = { tables: {} } as Db;
-  ok(db, [{ op: 'add_project', id: 'P', start: '2026-01-05' }, { op: 'add_wbs', code: 'W' }, ...Array.from({ length: n }, (_, i) => ({ op: 'add_activity', id: `A${1000 + i}`, name: `Act ${i}`, wbs: 'W', duration_days: 5 }))]);
+  ok(db, [{ op: 'add_project', currency: 'USD', id: 'P', start: '2026-01-05' }, { op: 'add_wbs', code: 'W' }, ...Array.from({ length: n }, (_, i) => ({ op: 'add_activity', id: `A${1000 + i}`, name: `Act ${i}`, wbs: 'W', duration_days: 5 }))]);
   return db;
 };
 
@@ -63,7 +63,7 @@ test('the MCP LOB guard sees through select, link_activities and renumber_activi
 test('store_period_performance and set_period_actuals agree on a role assignment (labor): editing one assignment does not move the activity by the role\'s units', () => {
   const db = { tables: {} } as Db;
   ok(db, [
-    { op: 'add_project', id: 'P', start: '2026-01-05' }, { op: 'add_resource', id: 'LAB', type: 'labor' }, { op: 'add_role', id: 'ENG', name: 'Engineer' },
+    { op: 'add_project', currency: 'USD', id: 'P', start: '2026-01-05' }, { op: 'add_resource', id: 'LAB', type: 'labor' }, { op: 'add_role', id: 'ENG', name: 'Engineer' },
     { op: 'add_activity', id: 'A', name: 'Dig', duration_days: 20 },
     { op: 'assign_resource', activity: 'A', resource: 'LAB', units: 160 }, { op: 'assign_role', activity: 'A', role: 'ENG', units: 80 },
     { op: 'set_fields', table: 'PROJECT', where: { proj_short_name: 'P' }, fields: { act_this_per_link_flag: 'Y' } },
@@ -80,7 +80,7 @@ test('store_period_performance and set_period_actuals agree on a role assignment
 
 test('periods from a file without calendars stay with their calendar when another calendar becomes the default', () => {
   const db = { tables: {} } as Db;
-  ok(db, [{ op: 'add_project', id: 'GC', start: '2007-01-01' }, { op: 'add_financial_period_calendar', name: 'Monthly' }]);
+  ok(db, [{ op: 'add_project', currency: 'USD', id: 'GC', start: '2007-01-01' }, { op: 'add_financial_period_calendar', name: 'Monthly' }]);
   // a P6 file from before calendars (FINDATES with no fintmpl_id), imported into it
   const src = parseXer(new Uint8Array(readFileSync(join(SAMPLES_DIR, 'cairo alex-road.xer')))).db;
   const { projIds: [pid] } = importIntoDb(db, src, defaultPlan(src));

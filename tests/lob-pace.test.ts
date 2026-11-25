@@ -16,7 +16,7 @@ const floors = ['F1', 'F2', 'F3', 'F4', 'F5'];
 const task = (code: string, crewSize: number, timing: Timing): LobTask => ({ code, name: code, trade: code, precision: 1, order: [...floors], items: [{ name: code, unit: 'm2', consumption: 0.5, quantities: floors.map((location) => ({ location, quantity: 1000 })) }], segments: [{ from: 'F1', to: 'F5', crews: 1, crewSize, productivity: 1, driver: 'crew', timing }] });
 function build(timing: Timing): { db: Db; pid: string; m: LobModel } {
   const db: Db = { tables: {} };
-  applyOps(db, [{ op: 'add_project', id: 'LOB', start: '2026-03-02' }]);
+  applyOps(db, [{ op: 'add_project', currency: 'USD', id: 'LOB', start: '2026-03-02' }]);
   const pid = rows(db, 'PROJECT')[0].proj_id;
   // concrete: 6.25 days a floor; plaster, twice the crew: 3.125 days a floor, after the concrete of its floor
   const m: LobModel = { version: 1, project: 'LOB', levels: ['Floor'], locations: floors.map((code) => ({ code, name: code, level: 1, parent: null })), tasks: [task('CS', 10, 'asap'), task('PW', 20, timing)], links: [{ kind: 'task', pred: 'CS', succ: 'PW', type: 'FS', lagDays: 0 }] };
@@ -60,7 +60,7 @@ test('the exported XER alone (no LOB model, as real P6 reads it) schedules to th
 
 test('continuity that fights the logic yields after 20 passes and names the trade', () => {
   const db: Db = { tables: {} };
-  applyOps(db, [{ op: 'add_project', id: 'LOB', start: '2026-03-02' }]);
+  applyOps(db, [{ op: 'add_project', currency: 'USD', id: 'LOB', start: '2026-03-02' }]);
   const pid = rows(db, 'PROJECT')[0].proj_id;
   const three = ['L1', 'L2', 'L3'];
   // A's third location waits for B, which waits for A's second: pacing A pushes its second location later, which

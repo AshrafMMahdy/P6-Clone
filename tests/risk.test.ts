@@ -93,7 +93,7 @@ test('risk tables round-trip through the XER writer; _RISKEST is not exported', 
   const r = addRisk(db, '1', { risk_name: 'Ground conditions', pre_prob: 'M', pre_sched_impact_hr_cnt: '40', risk_type_id: '3' });
   linkActivity(db, r.proj_risk_id, '100');
   defaultEstimates(db, ['1']);
-  const text = new TextDecoder().decode(writeXer(db, { version: '19.12', projIds: ['1'], encoding: 'utf-8' }));
+  const text = new TextDecoder().decode(writeXer(db, { version: '19.12', projIds: ['1'], encoding: 'utf-8', currency: 'USD' }));
   assert.ok(!text.includes('_RISKEST'));
   const back = parseXer(new TextEncoder().encode(text)).db;
   assert.equal(back.tables.PROJRISK.rows[0].risk_name, 'Ground conditions');

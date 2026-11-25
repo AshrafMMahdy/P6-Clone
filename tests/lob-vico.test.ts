@@ -27,7 +27,7 @@ test('the Vico project in the clone: the same durations and dates as Schedule Pl
   assert.deepEqual(m.levels, ['Parts', 'Floors']);
   assert.equal(m.locations.filter((l) => l.level === 2).length, 18);
   const db: Db = { tables: {} };
-  const ops: unknown[] = [vicoCalendarOp(calendar!, 'Vico default', [2024, 2028]), { op: 'add_project', id: 'VICO', start: '2025-01-31', calendar: 'Vico default' }];
+  const ops: unknown[] = [vicoCalendarOp(calendar!, 'Vico default', [2024, 2028]), { op: 'add_project', currency: 'USD', id: 'VICO', start: '2025-01-31', calendar: 'Vico default' }];
   assert.equal(applyOps(db, ops, { hoursPerDay }).ok, true);
   const pid = rows(db, 'PROJECT')[0].proj_id;
   for (const t of m.tasks) t.calendar = 'Vico default';

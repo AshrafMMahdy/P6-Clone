@@ -28,7 +28,7 @@ const tmp = (p: string) => mkdtempSync(join(tmpdir(), p));
 
 /** A project with one activity per storey and class of a synthetic model, linked by rules. */
 async function linked(model: string, open: Record<string, unknown> = {}) {
-  const np = (await call('new_project', { id: 'BIG', start: '2027-01-04' })).d;
+  const np = (await call('new_project', { currency: 'USD', id: 'BIG', start: '2027-01-04' })).d;
   const h = np.handle, owner_key = np.owner_key;
   const om = await call('open_model', { handle: h, owner_key, path: model, ...open });
   assert.equal(om.err, false, JSON.stringify(om.d).slice(0, 400));
@@ -92,7 +92,7 @@ test('the streamed packages equal the text ones (tagged IFC, IFC4 4D), byte for 
   assert.equal(norm(readFileSync(out, 'latin1')), norm(t.text));
   const { applyOps } = await import('../core/project/ops.ts');
   const db = { tables: {} } as any;
-  applyOps(db, [{ op: 'add_project', id: 'P', start: '2027-01-04' }, { op: 'add_activity', id: 'A1', name: 'Walls', duration_days: 5 }]);
+  applyOps(db, [{ op: 'add_project', currency: 'USD', id: 'P', start: '2027-01-04' }, { op: 'add_activity', id: 'A1', name: 'Walls', duration_days: 5 }]);
   const pid = db.tables.PROJECT.rows[0].proj_id; items[0].taskId = db.tables.TASK.rows[0].task_id;
   const o4 = join(tmp('p6-st-'), '4d.ifc');
   const a = await ifc4dFile(db, pid, f, o4, items), b = ifc4dText(db, pid, text, items);

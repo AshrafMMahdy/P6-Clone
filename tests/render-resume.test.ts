@@ -41,7 +41,7 @@ const env = (vars: Record<string, string | undefined>) => {
 const hook = (o: Partial<typeof testHooks>) => { const was = { ...testHooks }; Object.assign(testHooks, o); return () => Object.assign(testHooks, was); };
 
 async function duplex() {
-  const np = (await call('new_project', { id: 'D4', start: '2026-03-02' })).d;
+  const np = (await call('new_project', { currency: 'USD', id: 'D4', start: '2026-03-02' })).d;
   const h = np.handle, owner_key = np.owner_key;
   const acts = [['L1W', 'Level 1 walls', 'Level 1', 'IfcWall', 10], ['L2S', 'Level 2 slab', 'Level 2', 'IfcSlab', 6], ['L2W', 'Level 2 walls', 'Level 2', 'IfcWall', 10], ['ROOF', 'Roof', 'Roof', '', 8]] as const;
   const ops: unknown[] = acts.map(([id, name, , , d]) => ({ op: 'add_activity', id, name, duration_days: d }));
@@ -1011,7 +1011,7 @@ test('a render the soft timeout turns into a job is named by that job: render_bu
 test('a call the soft timeout turns into a job is that job for the tool: its progress goes to the job', { timeout: 120_000 }, async () => {
   const { config } = await import('../mcp/runtime.ts');
   const { callTool, toolResult } = await import('../mcp/server.ts');
-  const np = (await call('new_project', { id: 'PROMO', start: '2026-03-02' })).d;
+  const np = (await call('new_project', { currency: 'USD', id: 'PROMO', start: '2026-03-02' })).d;
   const ops: unknown[] = [];
   for (let i = 0; i < 60; i++) ops.push({ op: 'add_activity', id: `A${i}`, name: `A${i}`, duration_days: 3 }, ...(i ? [{ op: 'add_relationship', pred: `A${i - 1}`, succ: `A${i}` }] : []));
   await call('edit', { handle: np.handle, owner_key: np.owner_key, operations: ops });

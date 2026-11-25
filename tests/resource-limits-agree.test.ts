@@ -21,7 +21,7 @@ const notJudged = (notes: string[] | undefined): { material: string[]; noLimit: 
 const count = (notes: string[] | undefined, re: RegExp): number => Number(re.exec((notes ?? []).find((x) => re.test(x)) ?? '')?.[1] ?? 0);
 
 test('a limited, a 0, a blank and a Material resource: the three tools judge the limited one only and name the same other ones', async () => {
-  const p = await call('new_project', { id: 'RL', start: '2026-01-05' });
+  const p = await call('new_project', { currency: 'USD', id: 'RL', start: '2026-01-05' });
   const act = (id: string, rs: string) => [{ op: 'add_activity', id, name: id, duration_days: 5 }, { op: 'assign_resource', activity: id, resource: rs }];
   const e = await call('edit', { handle: p.handle, operations: [
     { op: 'add_resource', id: 'LIM', max_units_per_day: 8 }, { op: 'add_resource', id: 'ZERO', max_units_per_day: 8 }, { op: 'add_resource', id: 'BLANK', max_units_per_day: 8 }, { op: 'add_resource', id: 'MAT', type: 'material', price_per_unit: 2 },
@@ -90,7 +90,7 @@ for (const [file, mat, none] of [['Detailed Program.xer', 123, 0], ['130 TRIAL.x
 }
 
 test('a Material resource added without a limit is told no default limit that will never be used', async () => {
-  const p = await call('new_project', { id: 'RM', start: '2026-01-05' });
+  const p = await call('new_project', { currency: 'USD', id: 'RM', start: '2026-01-05' });
   const e = await call('edit', { handle: p.handle, operations: [{ op: 'add_resource', id: 'MAT', type: 'material', price_per_unit: 2 }] });
   assert.ok(!(e.notes ?? []).some((x: string) => /default/.test(x)), JSON.stringify(e.notes));
 });

@@ -213,7 +213,7 @@ test('the probe: a failure that is not the graphics side’s is not remembered; 
 // ---- render_4d end to end with the stand-in browser -----------------------------------------------------------------
 
 async function duplex() {
-  const np = (await call('new_project', { id: 'D4', start: '2026-03-02' })).d;
+  const np = (await call('new_project', { currency: 'USD', id: 'D4', start: '2026-03-02' })).d;
   const h = np.handle, owner_key = np.owner_key;
   const acts = [['L1W', 'Level 1 walls', 'Level 1', 'IfcWall', 10], ['L2S', 'Level 2 slab', 'Level 2', 'IfcSlab', 6], ['L2W', 'Level 2 walls', 'Level 2', 'IfcWall', 10], ['ROOF', 'Roof', 'Roof', '', 8]] as const;
   const ops: unknown[] = acts.map(([id, name, , , d]) => ({ op: 'add_activity', id, name, duration_days: d }));

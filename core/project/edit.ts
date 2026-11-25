@@ -2,6 +2,7 @@
 // Shared by the desktop app (renderer/model.ts re-exports these) and the command-line tool.
 import { addField, dropIndexes, groupBy, indexBy, nextId, refTarget, rowIndex, rows, table, tableCache, type Db, type Row } from '../db.ts';
 import { formatP6Date, parseP6Date } from '../dates.ts';
+import { baseCurrency, setBaseCurrency, type CurrencySpec } from '../currency.ts';
 import { p6num, calendarResolver } from '../schedule/cpm.ts';
 import { ENUMS } from '../xer/schema.ts';
 import { pick, realOf, removeWhere } from '../journal.ts';
@@ -133,15 +134,11 @@ export function ensureDefaultCalendar(db: Db): Row {
   return r;
 }
 
-export function ensureCurrency(db: Db): void {
-  const c = table(db, 'CURRTYPE');
-  if (c.rows.length) return;
-  c.fields = ['curr_id', 'decimal_digit_cnt', 'curr_symbol', 'decimal_symbol', 'digit_group_symbol', 'pos_curr_fmt_type', 'neg_curr_fmt_type', 'curr_type', 'curr_short_name', 'group_digit_cnt', 'base_exch_rate'];
-  c.rows.push({ curr_id: '1', decimal_digit_cnt: '2', curr_symbol: '$', decimal_symbol: '.', digit_group_symbol: ',', pos_curr_fmt_type: '#1.1', neg_curr_fmt_type: '(#1.1)', curr_type: 'US Dollar', curr_short_name: 'USD', group_digit_cnt: '3', base_exch_rate: '1' });
-}
-
-export function newProject(db: Db, o: { id: string; name: string; start: string; epsId?: string }): string {
-  ensureEps(db); ensureCurrency(db);
+/** A new project. `currency`: the file's base currency, when it has none yet (P6 asks for the base currency when the database is set up;
+ *  every project of a file shares it): never assumed — a file given none has none, and says so. */
+export function newProject(db: Db, o: { id: string; name: string; start: string; epsId?: string; currency?: CurrencySpec }): string {
+  ensureEps(db);
+  if (o.currency != null && !baseCurrency(db)) setBaseCurrency(db, o.currency);
   const cal = ensureDefaultCalendar(db);
   const P = table(db, 'PROJECT');
   const pid = String(nextId(db, 'PROJECT'));

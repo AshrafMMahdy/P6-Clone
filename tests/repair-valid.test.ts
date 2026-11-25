@@ -18,7 +18,7 @@ const dir = mkdtempSync(join(tmpdir(), 'p6repair-'));
 /** A small project with one of each damage. */
 function damaged(): string {
   const db: Db = { tables: {} };
-  assert.equal(applyOps(db, [{ op: 'add_project', id: 'DMG', start: '2026-03-02' }, { op: 'add_wbs', code: 'W', name: 'Works' },
+  assert.equal(applyOps(db, [{ op: 'add_project', currency: 'USD', id: 'DMG', start: '2026-03-02' }, { op: 'add_wbs', code: 'W', name: 'Works' },
     ...['IMPOSS', 'SPAN', 'NONE', 'FUTURE', 'BADFIN', 'ANCIENT', 'ORDER', 'NOSTART', 'SHIFT', 'CODES', 'TWIN'].map((id) => ({ op: 'add_activity', id, name: `Activity ${id}`, wbs: 'W', duration_days: 5 })),
     { op: 'add_relationship', pred: 'IMPOSS', succ: 'SHIFT' }, { op: 'add_relationship', pred: 'SHIFT', succ: 'CODES' }, { op: 'add_relationship', pred: 'IMPOSS', succ: 'CODES' },
     { op: 'set_project', data_date: '2026-03-16' }]).ok, true);
@@ -149,7 +149,7 @@ test('save repair on every Tower-A variant: the baseline with no root WBS node g
 test('repair: a project without its root WBS node gets one, and WBS elements whose parent is missing go under it', async () => {
   const { repairToValid } = await import('../core/xer/repair-valid.ts');
   const db: Db = { tables: {} };
-  assert.equal(applyOps(db, [{ op: 'add_project', id: 'NOROOT', start: '2026-03-02' }, { op: 'add_wbs', code: 'A' }, { op: 'add_wbs', code: 'B', parent: 'A' }, { op: 'add_activity', id: 'X1', name: 'x', wbs: 'A.B' }]).ok, true);
+  assert.equal(applyOps(db, [{ op: 'add_project', currency: 'USD', id: 'NOROOT', start: '2026-03-02' }, { op: 'add_wbs', code: 'A' }, { op: 'add_wbs', code: 'B', parent: 'A' }, { op: 'add_activity', id: 'X1', name: 'x', wbs: 'A.B' }]).ok, true);
   const W = db.tables.PROJWBS.rows, rootId = W.find((w) => w.proj_node_flag === 'Y')!.wbs_id;
   db.tables.PROJWBS.rows = W.filter((w) => w.proj_node_flag !== 'Y');
   const { changes } = repairToValid(db);

@@ -399,6 +399,7 @@ function projectReader(findings: Finding[], src: string | Chunked, opts: { conve
     name: val(p, 'Name'), title: val(p, 'Title'), start: rDate('Project', p, 'StartDate'), finish: rDate('Project', p, 'FinishDate'),
     statusDate: rDate('Project', p, 'StatusDate'), calUid: val(p, 'CalendarUID'), minutesPerDay: ctx.minutesPerDay, minutesPerWeek: ctx.minutesPerWeek!,
     splitsInProgress: rFlag('Project', p, 'SplitsInProgressTasks'), criticalHrs: rNum('Project', p, 'CriticalSlackLimit') ?? 0,
+    ...(val(p, 'CurrencyCode') ? { currency: { code: val(p, 'CurrencyCode'), ...(val(p, 'CurrencySymbol') ? { symbol: val(p, 'CurrencySymbol') } : {}), ...(/^\d+$/.test(val(p, 'CurrencyDigits') ?? '') ? { digits: Number(val(p, 'CurrencyDigits')) } : {}) } } : {}),
     calendars, tasks, resources, assignments, custom,
     keep: { kids: p.children.map((c): [string, string | null] => [c.name, COLLECTIONS.has(c.name) ? null : raw(c)]), ghosts, p6ext: extKey.size > 0, plainCurrency: !!ctx.plainCurrency, cfUsed: [...cfUsed], cfRead: custom.map((c) => c.fieldId) },
     // dates made by P6 (a file the clone wrote from P6): F9 keeps P6's rules; dates made by Microsoft Project: its rule

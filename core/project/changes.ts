@@ -64,7 +64,8 @@ const TABLE_FIELDS: Record<string, Record<string, string>> = {
   TASKFIN: { act_work_qty: 'Actual Labor Units', act_work_cost: 'Actual Labor Cost', act_equip_qty: 'Actual Nonlabor Units', act_equip_cost: 'Actual Nonlabor Cost', act_mat_cost: 'Actual Material Cost', act_expense_cost: 'Actual Expense Cost',
     bcwp: 'Earned Value Cost', perfm_work_qty: 'Earned Value Labor Units', bcws: 'Planned Value Cost', sched_work_qty: 'Planned Value Labor Units' },
   TRSRCFIN: { act_qty: 'Actual Units', act_cost: 'Actual Cost' },
-  CURRTYPE: { curr_type: 'Currency Name', curr_short_name: 'Currency ID', curr_symbol: 'Currency Symbol' },
+  // (P6's Currencies dialog: General and Appearance)
+  CURRTYPE: { curr_type: 'Currency Name', curr_short_name: 'Currency ID', curr_symbol: 'Currency Symbol', decimal_digit_cnt: 'Decimal Places', decimal_symbol: 'Decimal Symbol', digit_group_symbol: 'Digit Grouping Symbol', group_digit_cnt: 'Digit Grouping', pos_curr_fmt_type: 'Positive Currency Format', neg_curr_fmt_type: 'Negative Currency Format', base_exch_rate: 'Exchange Rate' },
   MEMOTYPE: { memo_type: 'Notebook Topic' },
   ACTVTYPE: { actv_code_type: 'Activity Code Name' }, PCATTYPE: { proj_catg_type: 'Project Code Name' }, RCATTYPE: { rsrc_catg_type: 'Resource Code Name' }, ASGNMNTCATTYPE: { asgnmnt_catg_type: 'Assignment Code Name' },
   ACTVCODE: { short_name: 'Code Value', actv_code_name: 'Description' }, PCATVAL: { proj_catg_short_name: 'Code Value', proj_catg_name: 'Description' }, RCATVAL: { rsrc_catg_short_name: 'Code Value', rsrc_catg_name: 'Description' },

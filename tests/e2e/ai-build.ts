@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 const ok = (c: boolean, m: string) => { console.log((c ? 'PASS ' : 'FAIL ') + m); if (!c) process.exitCode = 1; };
 // 15 rounds of edits (more than the 12 rounds allowed without progress), the first one creating the project
 const steps: any[] = [
-  { name: 'edit_project', args: { operations: [{ op: 'add_project', id: 'B5', name: 'Five-story building', start: '2026-11-02' }, { op: 'add_wbs', code: 'STR', name: 'Structure' }, { op: 'add_activity', id: 'A1000', name: 'Start', type: 'start_milestone', wbs: 'STR' }] } },
+  { name: 'edit_project', args: { operations: [{ op: 'add_project', currency: 'USD', id: 'B5', name: 'Five-story building', start: '2026-11-02' }, { op: 'add_wbs', code: 'STR', name: 'Structure' }, { op: 'add_activity', id: 'A1000', name: 'Start', type: 'start_milestone', wbs: 'STR' }] } },
   ...Array.from({ length: 12 }, (_, i) => ({ name: 'edit_project', args: { operations: [{ op: 'add_activity', id: `A${1010 + i * 10}`, name: `Level ${i + 1} frame`, wbs: 'STR', duration_days: 5 }, { op: 'add_relationship', pred: `A${1000 + i * 10}`, succ: `A${1010 + i * 10}` }] } })),
   { name: 'edit_project', args: { operations: [{ op: 'add_activity', id: 'A9999', name: 'Finish', type: 'finish_milestone' }, { op: 'add_relationship', pred: 'A1120', succ: 'A9999' }] } },
   { name: 'ui_menu', args: { path: 'Tools > Schedule...' } },

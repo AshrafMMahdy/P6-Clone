@@ -1,4 +1,5 @@
 // Derived views of the raw P6 tables for the UI: formatting, columns, edit rules, structural edits.
+import { formatMoney } from '../core/currency.ts';
 import { addField, emptyDb, groupBy, indexBy, nextId, rows, table, type Db, type Row } from '../core/db.ts';
 import { formatP6Date, parseP6Date } from '../core/dates.ts';
 import { p6num, calendarResolver } from '../core/schedule/cpm.ts';
@@ -12,7 +13,7 @@ import { dayHours, type DayHours } from '../core/project/units.ts';
 import { makeCtx as coreMakeCtx, isCritical, type Ctx as CoreCtx } from '../core/project/ctx.ts';
 import { isMilestone, statusOf, setStart as setStartLike, setFinish as setFinishLike, setActual, setPercent, refreshOwnDates } from '../core/project/edit.ts';
 export { isCritical, isMilestone, statusOf, setActual, setPercent, refreshOwnDates };
-export { normDate, ensureEps, ensureDefaultCalendar, ensureCurrency, newProject, projectName, nextTaskCode, TASK_FIELDS, addActivity, deleteActivities, dissolveActivities, checkRelationship, addRelationship, addWbs, enumOk } from '../core/project/edit.ts';
+export { normDate, ensureEps, ensureDefaultCalendar, newProject, projectName, nextTaskCode, TASK_FIELDS, addActivity, deleteActivities, dissolveActivities, checkRelationship, addRelationship, addWbs, enumOk } from '../core/project/edit.ts';
 /** Context computed once per render for column getters (the core context with the user's preferences). */
 export type Ctx = CoreCtx<Prefs>;
 export const makeCtx = (db: Db, prefs: Prefs): Ctx => coreMakeCtx(db, prefs);
@@ -112,8 +113,7 @@ export interface Column {
 }
 
 const sumBy = (rs: Row[] | undefined, f: string) => (rs ?? []).reduce((a, x) => a + Number(x[f] || 0), 0);
-const USD = new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 2 });
-const money = (n: number) => (n ? USD.format(n) : '$0.00');
+const money = (c: { db: Db }, n: number) => formatMoney(c.db, n);   // the file's base currency (core/currency.ts)
 // earned value per activity, worked out once per database state (the context is rebuilt when the database changes)
 const evCache = new WeakMap<object, Map<string, EarnedValue>>();
 export function evOf(ctx: Ctx): Map<string, EarnedValue> {
@@ -125,7 +125,7 @@ export function evOf(ctx: Ctx): Map<string, EarnedValue> {
   }
   return m;
 }
-const ev = (k: keyof EarnedValue, fmt: (v: number) => string) => (r: Row, c: Ctx) => { const e = evOf(c).get(r.task_id); return e ? fmt(e[k]) : ''; };
+const ev = (k: keyof EarnedValue, fmt: (v: number, c: Ctx) => string) => (r: Row, c: Ctx) => { const e = evOf(c).get(r.task_id); return e ? fmt(e[k], c) : ''; };
 const idx = (v: number) => (v ? v.toFixed(2) : '');
 const pct1 = (v: number) => `${Math.round(v * 10) / 10}%`;
 const startOf = (r: Row, ctx: Ctx) => (r.act_start_date ? `${fmtDate(r.act_start_date, ctx.prefs)} A` : fmtDate(r.restart_date || r.early_start_date || r.target_start_date, ctx.prefs) + (r.cstr_type && /MSO|MANDSTART/.test(r.cstr_type) ? '*' : ''));
@@ -202,21 +202,21 @@ export const COLUMNS: Column[] = [
   { id: 'resources', title: 'Resources', width: 140, get: (r, c) => (c.rsrcByTask.get(r.task_id) ?? []).map((a) => c.rsrc.get(a.rsrc_id)?.rsrc_short_name ?? '?').join(', ') },
   { id: 'bud_units', title: 'Budgeted Labor Units', width: 70, align: 'right', get: (r, c) => p6num(sumBy(c.rsrcByTask.get(r.task_id)?.filter((a) => (a.rsrc_type || c.rsrc.get(a.rsrc_id)?.rsrc_type) === 'RT_Labor'), 'target_qty')) },
   { id: 'act_units', title: 'Actual Labor Units', width: 70, align: 'right', get: (r, c) => p6num(sumBy(c.rsrcByTask.get(r.task_id)?.filter((a) => (a.rsrc_type || c.rsrc.get(a.rsrc_id)?.rsrc_type) === 'RT_Labor'), 'act_reg_qty')) },
-  { id: 'bud_cost', title: 'Budgeted Total Cost', width: 90, align: 'right', get: (r, c) => money(sumBy(c.rsrcByTask.get(r.task_id), 'target_cost') + sumBy(c.costByTask.get(r.task_id), 'target_cost')) },
-  { id: 'act_cost', title: 'Actual Total Cost', width: 90, align: 'right', get: (r, c) => money(sumBy(c.rsrcByTask.get(r.task_id), 'act_reg_cost') + sumBy(c.rsrcByTask.get(r.task_id), 'act_ot_cost') + sumBy(c.costByTask.get(r.task_id), 'act_cost')) },
-  { id: 'rem_cost', title: 'Remaining Total Cost', width: 90, align: 'right', get: (r, c) => money(sumBy(c.rsrcByTask.get(r.task_id), 'remain_cost') + sumBy(c.costByTask.get(r.task_id), 'remain_cost')) },
+  { id: 'bud_cost', title: 'Budgeted Total Cost', width: 90, align: 'right', get: (r, c) => money(c, sumBy(c.rsrcByTask.get(r.task_id), 'target_cost') + sumBy(c.costByTask.get(r.task_id), 'target_cost')) },
+  { id: 'act_cost', title: 'Actual Total Cost', width: 90, align: 'right', get: (r, c) => money(c, sumBy(c.rsrcByTask.get(r.task_id), 'act_reg_cost') + sumBy(c.rsrcByTask.get(r.task_id), 'act_ot_cost') + sumBy(c.costByTask.get(r.task_id), 'act_cost')) },
+  { id: 'rem_cost', title: 'Remaining Total Cost', width: 90, align: 'right', get: (r, c) => money(c, sumBy(c.rsrcByTask.get(r.task_id), 'remain_cost') + sumBy(c.costByTask.get(r.task_id), 'remain_cost')) },
   // Earned value (P6 column names; Admin Preferences defaults: baseline budget, performance % = activity % complete)
-  { id: 'ev_bac', title: 'Budget at Completion', width: 95, align: 'right', get: ev('bac', money) },
-  { id: 'ev_pv', title: 'Planned Value Cost', width: 95, align: 'right', get: ev('pv', money) },
-  { id: 'ev_ev', title: 'Earned Value Cost', width: 95, align: 'right', get: ev('ev', money) },
-  { id: 'ev_ac', title: 'Actual Cost (ACWP)', width: 95, align: 'right', get: ev('ac', money) },
-  { id: 'ev_sv', title: 'Schedule Variance', width: 90, align: 'right', get: ev('sv', money) },
-  { id: 'ev_cv', title: 'Cost Variance', width: 90, align: 'right', get: ev('cv', money) },
+  { id: 'ev_bac', title: 'Budget at Completion', width: 95, align: 'right', get: ev('bac', (v, c) => money(c, v)) },
+  { id: 'ev_pv', title: 'Planned Value Cost', width: 95, align: 'right', get: ev('pv', (v, c) => money(c, v)) },
+  { id: 'ev_ev', title: 'Earned Value Cost', width: 95, align: 'right', get: ev('ev', (v, c) => money(c, v)) },
+  { id: 'ev_ac', title: 'Actual Cost (ACWP)', width: 95, align: 'right', get: ev('ac', (v, c) => money(c, v)) },
+  { id: 'ev_sv', title: 'Schedule Variance', width: 90, align: 'right', get: ev('sv', (v, c) => money(c, v)) },
+  { id: 'ev_cv', title: 'Cost Variance', width: 90, align: 'right', get: ev('cv', (v, c) => money(c, v)) },
   { id: 'ev_spi', title: 'Schedule Performance Index', width: 70, align: 'right', get: ev('spi', idx) },
   { id: 'ev_cpi', title: 'Cost Performance Index', width: 70, align: 'right', get: ev('cpi', idx) },
-  { id: 'ev_etc', title: 'Estimate To Complete', width: 95, align: 'right', get: ev('etc', money) },
-  { id: 'ev_eac', title: 'Estimate At Completion', width: 95, align: 'right', get: ev('eac', money) },
-  { id: 'ev_vac', title: 'Variance At Completion', width: 95, align: 'right', get: ev('vac', money) },
+  { id: 'ev_etc', title: 'Estimate To Complete', width: 95, align: 'right', get: ev('etc', (v, c) => money(c, v)) },
+  { id: 'ev_eac', title: 'Estimate At Completion', width: 95, align: 'right', get: ev('eac', (v, c) => money(c, v)) },
+  { id: 'ev_vac', title: 'Variance At Completion', width: 95, align: 'right', get: ev('vac', (v, c) => money(c, v)) },
   { id: 'ev_sched_pct', title: 'Schedule % Complete', width: 70, align: 'right', get: ev('schedulePct', pct1) },
   { id: 'ev_perf_pct', title: 'Performance % Complete', width: 70, align: 'right', get: ev('performancePct', pct1) },
   { id: 'preds', title: 'Predecessors', width: 120, get: (r, c) => (c.predsOf.get(r.task_id) ?? []).map((p) => c.taskById.get(p.pred_task_id)?.task_code ?? `[${p.pred_task_id}]`).join(', ') },
@@ -266,7 +266,7 @@ export function extraColumns(db: Db): Column[] {
     out.push({ id, title: u.udf_type_label, width: 100, align: num ? 'right' : undefined, group: 'User Defined Fields', get: (r, c) => extraValue(c, id, r.task_id, () => {
       const ucodes = indexBy(rows(c.db, 'UDFCODE'), 'udf_code_id'), m = new Map<string, string>();
       for (const v of rows(c.db, 'UDFVALUE')) if (v.udf_type_id === u.udf_type_id) {
-        m.set(v.fk_id, /DATE/.test(ty) ? fmtDate(v.udf_date, c.prefs) : ty === 'FT_MONEY' ? money(Number(v.udf_number || 0)) : num ? (v.udf_number ?? '') : ty === 'FT_CODE' ? (ucodes.get(v.udf_code_id)?.short_name ?? '') : (v.udf_text ?? ''));
+        m.set(v.fk_id, /DATE/.test(ty) ? fmtDate(v.udf_date, c.prefs) : ty === 'FT_MONEY' ? money(c, Number(v.udf_number || 0)) : num ? (v.udf_number ?? '') : ty === 'FT_CODE' ? (ucodes.get(v.udf_code_id)?.short_name ?? '') : (v.udf_text ?? ''));
       }
       return m;
     }) });
@@ -295,7 +295,7 @@ function finColumn(db: Db, f: Row, key: string): Column {
   const cal = cals.length > 1 ? `${cals.find((c) => c.fintmpl_id === periodCalendar(db, f))?.fintmpl_name ?? ''} ` : '';
   return {
     id, title: `(${cal}${f.fin_dates_name}): ${FIN_TITLES[key]}`, width: 110, align: 'right', group: 'Financial Period Value',
-    get: (r, c) => extraValue(c, id, r.task_id, () => new Map(rows(c.db, 'TASKFIN').filter((x) => x.fin_dates_id === f.fin_dates_id).map((x) => [x.task_id, cost ? money(Number(x[field] || 0)) : String(Number(x[field] || 0))]))),
+    get: (r, c) => extraValue(c, id, r.task_id, () => new Map(rows(c.db, 'TASKFIN').filter((x) => x.fin_dates_id === f.fin_dates_id).map((x) => [x.task_id, cost ? money(c, Number(x[field] || 0)) : String(Number(x[field] || 0))]))),
     edit: {
       type: 'number', set: () => 'Past-period values are edited one cell at a time.',
       apply: (d, r, v) => {

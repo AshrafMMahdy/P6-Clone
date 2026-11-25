@@ -3,6 +3,7 @@
 // them; P6's standard reports are the same definitions shipped with the application, plus a few fixed-format ones
 // (schedule by WBS, cost by account, resource usage by month). Pure (no store): the app, the AI assistant, the CLI
 // and the MCP server all run reports through here.
+import { formatMoney } from '../../core/currency.ts';
 import { groupBy as groupRows, rows, type Db, type Row } from '../../core/db.ts';
 import { parseP6Date } from '../../core/dates.ts';
 import { activityCosts, earnedValue, sumLines, type CostLine } from '../../core/cost/rollup.ts';
@@ -25,7 +26,7 @@ export interface ReportEntry { id: string; name: string; group: string; kind: 's
 export interface RunOptions { prefs: Prefs; weeks?: number }
 export type { Report };
 
-const money = (n: number) => (n ? n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00');
+const money = (e: { db: Db }, n: number) => formatMoney(e.db, n);   // the file's base currency (core/currency.ts)
 const num2 = (n: number) => String(Math.round(n * 100) / 100);
 const days = (h: string | number | undefined, hpd: number) => (h === '' || h == null ? '' : num2(Number(h) / hpd));
 const n = (s: string | undefined) => Number(s || 0) || 0;
@@ -44,10 +45,10 @@ const ASSIGNMENT_COLS: Col<Row>[] = [
   { id: 'act_qty', title: 'Actual Units', align: 'right', get: (a) => num2(n(a.act_reg_qty) + n(a.act_ot_qty)) },
   { id: 'remain_qty', title: 'Remaining Units', align: 'right', get: (a) => num2(n(a.remain_qty)) },
   { id: 'atc_qty', title: 'At Completion Units', align: 'right', get: (a) => num2(n(a.act_reg_qty) + n(a.act_ot_qty) + n(a.remain_qty)) },
-  { id: 'target_cost', title: 'Budgeted Cost', align: 'right', get: (a) => money(n(a.target_cost)) },
-  { id: 'act_cost', title: 'Actual Cost', align: 'right', get: (a) => money(n(a.act_reg_cost) + n(a.act_ot_cost)) },
-  { id: 'remain_cost', title: 'Remaining Cost', align: 'right', get: (a) => money(n(a.remain_cost)) },
-  { id: 'atc_cost', title: 'At Completion Cost', align: 'right', get: (a) => money(n(a.act_reg_cost) + n(a.act_ot_cost) + n(a.remain_cost)) },
+  { id: 'target_cost', title: 'Budgeted Cost', align: 'right', get: (a, e) => money(e, n(a.target_cost)) },
+  { id: 'act_cost', title: 'Actual Cost', align: 'right', get: (a, e) => money(e, n(a.act_reg_cost) + n(a.act_ot_cost)) },
+  { id: 'remain_cost', title: 'Remaining Cost', align: 'right', get: (a, e) => money(e, n(a.remain_cost)) },
+  { id: 'atc_cost', title: 'At Completion Cost', align: 'right', get: (a, e) => money(e, n(a.act_reg_cost) + n(a.act_ot_cost) + n(a.remain_cost)) },
   { id: 'start', title: 'Start', get: (a, e) => fmtDate(a.act_start_date || a.restart_date || a.target_start_date, e.prefs) + (a.act_start_date ? ' A' : '') },
   { id: 'finish', title: 'Finish', get: (a, e) => fmtDate(a.act_end_date || a.reend_date || a.target_end_date, e.prefs) + (a.act_end_date ? ' A' : '') },
 ];
@@ -60,12 +61,12 @@ const WBS_COLS: Col<WbsRow>[] = [
   { id: 'start', title: 'Start', get: (x, e) => fmtDate(x.start, e.prefs) },
   { id: 'finish', title: 'Finish', get: (x, e) => fmtDate(x.finish, e.prefs) },
   { id: 'total_float', title: 'Total Float', align: 'right', get: (x) => (x.minTf == null ? '' : days(x.minTf, 1)) },
-  { id: 'budget', title: 'Budgeted Total Cost', align: 'right', get: (x) => money(x.line.budget) },
-  { id: 'actual', title: 'Actual Total Cost', align: 'right', get: (x) => money(x.line.actual) },
-  { id: 'remaining', title: 'Remaining Total Cost', align: 'right', get: (x) => money(x.line.remaining) },
+  { id: 'budget', title: 'Budgeted Total Cost', align: 'right', get: (x, e) => money(e, x.line.budget) },
+  { id: 'actual', title: 'Actual Total Cost', align: 'right', get: (x, e) => money(e, x.line.actual) },
+  { id: 'remaining', title: 'Remaining Total Cost', align: 'right', get: (x, e) => money(e, x.line.remaining) },
   ...(['bac', 'pv', 'ev', 'ac', 'sv', 'cv', 'spi', 'cpi', 'etc', 'eac', 'vac'] as const).map((k): Col<WbsRow> => ({
     id: `ev_${k}`, title: ({ bac: 'Budget at Completion', pv: 'Planned Value Cost', ev: 'Earned Value Cost', ac: 'Actual Cost (ACWP)', sv: 'Schedule Variance', cv: 'Cost Variance', spi: 'Schedule Performance Index', cpi: 'Cost Performance Index', etc: 'Estimate To Complete', eac: 'Estimate At Completion', vac: 'Variance At Completion' })[k],
-    align: 'right', get: (x) => { const v = earnedValue(x.line)[k]; return k === 'spi' || k === 'cpi' ? (v ? v.toFixed(2) : '') : money(v); },
+    align: 'right', get: (x, e) => { const v = earnedValue(x.line)[k]; return k === 'spi' || k === 'cpi' ? (v ? v.toFixed(2) : '') : money(e, v); },
   })),
 ];
 const RESOURCE_COLS: Col<Row>[] = [
@@ -73,13 +74,13 @@ const RESOURCE_COLS: Col<Row>[] = [
   { id: 'rsrc_name', title: 'Resource Name', get: (r) => r.rsrc_name },
   { id: 'rsrc_type', title: 'Resource Type', get: (r) => ({ RT_Labor: 'Labor', RT_Equip: 'Nonlabor', RT_Mat: 'Material' } as Record<string, string>)[r.rsrc_type] ?? r.rsrc_type },
   { id: 'max_units', title: 'Max Units / Day', align: 'right', get: (r, e) => { const x = rows(e.db, 'RSRCRATE').find((q) => q.rsrc_id === r.rsrc_id); return x?.max_qty_per_hr ? num2(n(x.max_qty_per_hr) * e.prefs.hoursPerDay) : ''; } },
-  { id: 'price', title: 'Price / Unit', align: 'right', get: (r, e) => { const x = rows(e.db, 'RSRCRATE').find((q) => q.rsrc_id === r.rsrc_id); return x?.cost_per_qty ? money(n(x.cost_per_qty)) : ''; } },
+  { id: 'price', title: 'Price / Unit', align: 'right', get: (r, e) => { const x = rows(e.db, 'RSRCRATE').find((q) => q.rsrc_id === r.rsrc_id); return x?.cost_per_qty ? money(e, n(x.cost_per_qty)) : ''; } },
   { id: 'calendar', title: 'Calendar', get: (r, e) => rows(e.db, 'CALENDAR').find((c) => c.clndr_id === r.clndr_id)?.clndr_name ?? '' },
   { id: 'assignments', title: 'Assignments', align: 'right', get: (r, e) => String(asgOf(e).get(r.rsrc_id)?.length ?? 0) },
   { id: 'target_qty', title: 'Budgeted Units', align: 'right', get: (r, e) => num2((asgOf(e).get(r.rsrc_id) ?? []).reduce((s, a) => s + n(a.target_qty), 0)) },
   { id: 'act_qty', title: 'Actual Units', align: 'right', get: (r, e) => num2((asgOf(e).get(r.rsrc_id) ?? []).reduce((s, a) => s + n(a.act_reg_qty) + n(a.act_ot_qty), 0)) },
   { id: 'remain_qty', title: 'Remaining Units', align: 'right', get: (r, e) => num2((asgOf(e).get(r.rsrc_id) ?? []).reduce((s, a) => s + n(a.remain_qty), 0)) },
-  { id: 'target_cost', title: 'Budgeted Cost', align: 'right', get: (r, e) => money((asgOf(e).get(r.rsrc_id) ?? []).reduce((s, a) => s + n(a.target_cost), 0)) },
+  { id: 'target_cost', title: 'Budgeted Cost', align: 'right', get: (r, e) => money(e, (asgOf(e).get(r.rsrc_id) ?? []).reduce((s, a) => s + n(a.target_cost), 0)) },
 ];
 const asgCache = new WeakMap<Env, Map<string, Row[]>>();
 const asgOf = (e: Env) => { let m = asgCache.get(e); if (!m) { m = groupRows(rows(e.db, 'TASKRSRC').filter((a) => e.projIds.includes(a.proj_id)), 'rsrc_id'); asgCache.set(e, m); } return m; };

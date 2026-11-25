@@ -1,7 +1,8 @@
+import { formatMoney } from '../../core/currency.ts';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as RME } from 'react';
 import { Grid, type EditorSpec, type GridItem } from '../components/Grid.tsx';
 import { Split, showContextMenu } from '../components/Layout.tsx';
-import { mutate, setUi, toast, useStore, type Prefs } from '../store.ts';
+import { getDb, mutate, setUi, toast, useStore, type Prefs } from '../store.ts';
 import { useCtx } from '../hooks.ts';
 import { fmtDate, RSRC_TYPES } from '../model.ts';
 import { rows, type Row } from '../../core/db.ts';
@@ -31,8 +32,7 @@ const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct
 
 const num = (s: string | undefined) => Number(s || 0) || 0;
 const fmtN = (n: number) => String(Math.round(n * 100) / 100);
-const USD = new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }); // one formatter (creating one per cell is slow)
-const money = (n: number) => USD.format(n);
+const money = (n: number) => formatMoney(getDb(), n);   // the open file's base currency (core/currency.ts)
 const actQty = (a: Row) => num(a.act_reg_qty) + num(a.act_ot_qty);
 const actCost = (a: Row) => num(a.act_reg_cost) + num(a.act_ot_cost);
 

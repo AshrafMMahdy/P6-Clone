@@ -11,7 +11,7 @@ import { scheduleProjects } from '../core/schedule/cpm.ts';
 function build(flag: 'Y' | 'N') {
   const db = emptyDb();
   const r = applyOps(db, [
-    { op: 'add_project', id: 'SS', start: '2027-03-01' },
+    { op: 'add_project', currency: 'USD', id: 'SS', start: '2027-03-01' },
     { op: 'add_activity', id: 'P0', name: 'Predecessor', duration_days: 10 },
     { op: 'add_activity', id: 'A', name: 'Started early', duration_days: 10 },
     { op: 'add_activity', id: 'B', name: 'Follows A by SS 15d', duration_days: 5 },

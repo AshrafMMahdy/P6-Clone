@@ -16,7 +16,7 @@ function model(): LobModel {
 }
 function project(): { db: Db; pid: string } {
   const db: Db = { tables: {} };
-  assert.equal(applyOps(db, [{ op: 'add_project', id: 'LOB', start: '2026-03-02' }]).ok, true);
+  assert.equal(applyOps(db, [{ op: 'add_project', currency: 'USD', id: 'LOB', start: '2026-03-02' }]).ok, true);
   return { db, pid: rows(db, 'PROJECT')[0].proj_id };
 }
 const rels = (db: Db) => { const id = new Map(rows(db, 'TASK').map((t) => [t.task_id, t.task_code])); return rows(db, 'TASKPRED').map((r) => `${id.get(r.pred_task_id)}>${id.get(r.task_id)}`).sort(); };
@@ -64,7 +64,7 @@ test('a second expansion changes nothing; a new floor adds its activities and ke
 
 test('a link to a CPM project: its milestone drives the first location; relationships a user added are left alone', () => {
   const { db, pid } = project();
-  applyOps(db, [{ op: 'add_project', id: 'DES', start: '2026-03-02' }, { op: 'add_activity', id: 'M1', name: 'Steel delivered', type: 'finish_milestone', project: 'DES' }]);
+  applyOps(db, [{ op: 'add_project', currency: 'USD', id: 'DES', start: '2026-03-02' }, { op: 'add_activity', id: 'M1', name: 'Steel delivered', type: 'finish_milestone', project: 'DES' }]);
   const m = model();
   m.links.push({ kind: 'task', pred: 'M1', succ: 'CS', type: 'FS', lagDays: 2, project: 'DES' });
   expandLob(db, pid, m, { hoursPerDay: 8 });

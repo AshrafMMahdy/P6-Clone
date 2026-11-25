@@ -69,7 +69,7 @@ const plain = (d: any) => { const { exported: _e, elapsed_seconds: _s, ...rest }
 
 /** A chain of n activities ending in a milestone (A0 -> A1 -> ... -> M1). */
 async function chain(id: string, count: number, extra: unknown[] = []) {
-  const np = (await call('new_project', { id, start: '2026-03-02' })).d;
+  const np = (await call('new_project', { currency: 'USD', id, start: '2026-03-02' })).d;
   const ops: unknown[] = [];
   for (let i = 0; i < count; i++) ops.push({ op: 'add_activity', id: `A${i}`, name: `Activity, "${i}"`, duration_days: 2 + (i % 3) }, ...(i ? [{ op: 'add_relationship', pred: `A${i - 1}`, succ: `A${i}` }] : []));
   ops.push({ op: 'add_activity', id: 'M1', name: 'Done', type: 'finish_milestone' }, { op: 'add_relationship', pred: `A${count - 1}`, succ: 'M1' }, ...extra);
@@ -294,7 +294,7 @@ test('crash_schedule, float_paths, progress_curves, resource_histogram, tia, lev
 });
 
 test('lob_view: limit cuts the lists (their _totals say how many there are), the export has every location, collision and gap', async () => {
-  const np = (await call('new_project', { id: 'LOBX', start: '2026-03-02' })).d;
+  const np = (await call('new_project', { currency: 'USD', id: 'LOBX', start: '2026-03-02' })).d;
   const TASKS = [
     { code: 'CS', name: 'Concrete skeleton', trade: 'Concrete', level: 'Floor', unit: 'm3', consumption: 9, quantity: 60, crew_size: 18 },
     { code: 'DW', name: 'Drywall', trade: 'Drywall', level: 'Floor', unit: 'm2', consumption: 0.5, quantity: 1400, crew_size: 16 },
@@ -316,7 +316,7 @@ test('lob_view: limit cuts the lists (their _totals say how many there are), the
 });
 
 test('optimize_schedule: the export lists every activity under CPM, P6 leveling and the reasoner, and the whole priority order', { skip: !reasonerModelPath() && 'models/reasoner.onnx is not present' }, async () => {
-  const np = (await call('new_project', { id: 'OPTX', start: '2026-06-01' })).d;
+  const np = (await call('new_project', { currency: 'USD', id: 'OPTX', start: '2026-06-01' })).d;
   const ops: unknown[] = [{ op: 'add_resource', id: 'civil', name: 'Civil', max_units_per_hour: 2 }];
   for (let i = 0; i < 110; i++) ops.push({ op: 'add_activity', id: `B${i}`, name: `B${i}`, duration_days: 1 + (i % 4) }, { op: 'assign_resource', activity: `B${i}`, resource: 'civil', units_per_day: 16 });
   assert.equal((await call('edit', { handle: np.handle, owner_key: np.owner_key, operations: ops })).err, false);
@@ -364,7 +364,7 @@ test('kept runs of monte_carlo and evaluate_batch live at an absolute path: with
   try {
     await rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 't', version: '1' } });
     rmSync(cwd, { recursive: true, force: true });
-    const np = (await tool('new_project', { id: 'K', start: '2026-03-02' })).d;
+    const np = (await tool('new_project', { currency: 'USD', id: 'K', start: '2026-03-02' })).d;
     const H = { handle: np.handle, owner_key: np.owner_key };
     assert.equal((await tool('edit', { ...H, operations: [{ op: 'add_activity', id: 'A', name: 'a', duration_days: 3 }, { op: 'add_activity', id: 'B', name: 'b', duration_days: 4 }, { op: 'add_relationship', pred: 'A', succ: 'B' }] })).err, false);
     const mc = { ...H, iterations: 40, seed: 2, default_estimates: { min_pct: 90, max_pct: 125 } };
@@ -454,7 +454,7 @@ test('evaluate_batch: a batch started without export and resumed with it exports
 });
 
 test('CSV cells: text Excel would run as a formula starts with \', a lone CR is quoted; review lists activities by ID and name, saved dates apart', async () => {
-  const np = (await call('new_project', { id: 'CSVX', start: '2026-03-02' })).d;
+  const np = (await call('new_project', { currency: 'USD', id: 'CSVX', start: '2026-03-02' })).d;
   const H = { handle: np.handle, owner_key: np.owner_key };
   await call('edit', { ...H, operations: [{ op: 'add_activity', id: 'A1', name: '=HYPERLINK("x")', duration_days: 2 }, { op: 'add_activity', id: 'A2', name: '+1 crew', duration_days: 2 }, { op: 'add_activity', id: 'A3', name: 'one\rtwo', duration_days: 2 }, { op: 'add_activity', id: 'A4', name: '@home', duration_days: 2 }] });
   await call('schedule', H);
@@ -574,7 +574,7 @@ test('E4: every list the answer cut says where all of it is, when an export was 
   assert.ok(lint.checks.filter((x: any) => x.total_activities <= 25).every((x: any) => x.activities_note === undefined));
   await call('close', { handle: c, discard: true });
   // float_paths between on 80 diamonds: 2^80 paths, a decimal string, exactly
-  const np = (await call('new_project', { id: 'E4L', start: '2026-03-02' })).d;
+  const np = (await call('new_project', { currency: 'USD', id: 'E4L', start: '2026-03-02' })).d;
   const ops: unknown[] = [{ op: 'add_activity', id: 'S', name: 'S', duration_days: 1 }];
   let prev = 'S';
   for (let i = 1; i <= 80; i++) { ops.push({ op: 'add_activity', id: `a${i}`, name: 'a', duration_days: 1 }, { op: 'add_activity', id: `b${i}`, name: 'b', duration_days: 2 }, { op: 'add_activity', id: `J${i}`, name: 'J', duration_days: 1 }, { op: 'add_relationship', pred: prev, succ: `a${i}` }, { op: 'add_relationship', pred: prev, succ: `b${i}` }, { op: 'add_relationship', pred: `a${i}`, succ: `J${i}` }, { op: 'add_relationship', pred: `b${i}`, succ: `J${i}` }); prev = `J${i}`; }

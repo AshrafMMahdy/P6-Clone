@@ -16,7 +16,7 @@ import { datesNotCurrent } from '../core/notes.ts';
 testRoots(); // reads: the repository and this run's temp folder (the sample copies); writes: that folder
 const call = async (name: string, args: Record<string, unknown>) => { const r = await callTool(name, args); return toolResult(r.out, r.isError, name).structuredContent as any; };
 async function built(start: string, ops: unknown[], id = 'P'): Promise<string> {
-  const p = await call('new_project', { id, start });
+  const p = await call('new_project', { currency: 'USD', id, start });
   const e = await call('edit', { handle: p.handle, operations: ops });
   assert.ok(e.ok !== false && !e.error, JSON.stringify(e));
   return p.handle;
@@ -148,7 +148,7 @@ test('17: the activity count says when duplicate rows were merged', async () => 
 });
 
 test('18: update_progress is keyed by Project ID, in the style of the other tools; the reschedule\'s findings stay in the log, the edit is confirmed once', async () => {
-  const p = await call('new_project', { id: 'UPD', start: '2026-01-05', must_finish_by: '2026-01-09' });
+  const p = await call('new_project', { currency: 'USD', id: 'UPD', start: '2026-01-05', must_finish_by: '2026-01-09' });
   await call('edit', { handle: p.handle, operations: [act('A', 5), act('B', 10), rel('A', 'B')] });
   const u = await call('update_progress', { handle: p.handle, data_date: '2026-01-07' });
   assert.equal(u.ok, true);
@@ -184,7 +184,7 @@ test('20: windows_analysis says when an update\'s saved dates are not current, a
 
 test('21: each project has its own data date in the calculation; the answers show each one\'s own, said once', async () => {
   const h = await built('2026-01-05', [act('A', 5), act('B', 5), rel('A', 'B')], 'P1');
-  await call('edit', { handle: h, operations: [{ op: 'add_project', id: 'P2', start: '2026-01-05' }, { op: 'add_activity', project: 'P2', id: 'X', name: 'X', duration_days: 5 }, { op: 'set_project', project: 'P2', data_date: '2026-01-12' }, { op: 'set_project', project: 'P1', data_date: '2026-01-07' }] });
+  await call('edit', { handle: h, operations: [{ op: 'add_project', currency: 'USD', id: 'P2', start: '2026-01-05' }, { op: 'add_activity', project: 'P2', id: 'X', name: 'X', duration_days: 5 }, { op: 'set_project', project: 'P2', data_date: '2026-01-12' }, { op: 'set_project', project: 'P1', data_date: '2026-01-07' }] });
   const s = await call('schedule', { handle: h });
   assert.deepEqual(s.data_dates, { P1: '2026-01-07 00:00', P2: '2026-01-12 00:00' });
   assert.deepEqual(s.notes, ['P1 and P2 have different data dates (2026-01-07, 2026-01-12): each project\u2019s own date was used; pass project to work on one.']);
@@ -257,7 +257,7 @@ test('27: the answer too large to return says where all of it is, also when it c
 
 test('40: grammar for 1 and for the suggestion', () => {
   const db: Db = { tables: {} };
-  assert.ok(applyOps(db, [{ op: 'add_project', id: 'G', start: '2026-01-05' }, { op: 'add_activity', id: 'A', name: 'A', duration_days: 1 }, ...['B', 'C', 'D'].map((id) => ({ op: 'add_activity', id, name: id, duration_days: 1, constraint: { type: 'start_on_or_after', date: '2026-03-02' } })), { op: 'add_resource', id: 'R' }]).ok);
+  assert.ok(applyOps(db, [{ op: 'add_project', currency: 'USD', id: 'G', start: '2026-01-05' }, { op: 'add_activity', id: 'A', name: 'A', duration_days: 1 }, ...['B', 'C', 'D'].map((id) => ({ op: 'add_activity', id, name: id, duration_days: 1, constraint: { type: 'start_on_or_after', date: '2026-03-02' } })), { op: 'add_resource', id: 'R' }]).ok);
   assert.ok(scheduleProjects(db, [rows(db, 'PROJECT')[0].proj_id]).ok);
   rows(db, 'PROJECT')[0].last_recalc_date = '2026-01-12 08:00';
   db.tables.RSRC.fields.push('def_qty_per_hrx'); rows(db, 'RSRC')[0].def_qty_per_hrx = '1';
@@ -279,7 +279,7 @@ test('32, 37: schedule_index says each reason once and without internal words', 
   assert.equal(si.method, undefined, 'the weights and the logic definitions are in the tool description');
   assert.deepEqual(si.notes, ['Baseline drift risk not assessed: no project baseline is assigned to P; assign one with edit assign_baseline, or pass baseline.', 'Resource risk not assessed: no resource is assigned to an activity.']);
   assert.deepEqual(si.summary.risk.left_out, ['baseline_drift', 'resource']);
-  const e = await call('new_project', { id: 'EMPTY', start: '2026-01-05' });
+  const e = await call('new_project', { currency: 'USD', id: 'EMPTY', start: '2026-01-05' });
   const es = await call('schedule_index', { handle: e.handle });
   assert.equal(es.summary.health.note, undefined);
   assert.equal(es.summary.risk.note, undefined);

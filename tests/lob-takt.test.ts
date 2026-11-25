@@ -35,7 +35,7 @@ test('takt apply: crews sized to fit, every zone exactly one takt period, paced,
 
 function scheduled(): { db: Db; pid: string; m: LobModel } {
   const db: Db = { tables: {} };
-  applyOps(db, [{ op: 'add_project', id: 'LOB', start: '2026-03-02' }]);
+  applyOps(db, [{ op: 'add_project', currency: 'USD', id: 'LOB', start: '2026-03-02' }]);
   const pid = rows(db, 'PROJECT')[0].proj_id;
   const m = model();
   m.tasks[0].items[0].quantities.forEach((q) => (q.quantity = 800));

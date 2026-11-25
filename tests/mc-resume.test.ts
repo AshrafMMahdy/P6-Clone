@@ -26,7 +26,7 @@ const call = async (name: string, args: Record<string, unknown>) => {
 };
 /** A chain of activities with a milestone at its end, two register risks on it. */
 const project = async (n: number) => {
-  const np = (await call('new_project', { id: `MCR${Math.random().toString(36).slice(2, 6)}`, start: '2026-03-02' })).d;
+  const np = (await call('new_project', { currency: 'USD', id: `MCR${Math.random().toString(36).slice(2, 6)}`, start: '2026-03-02' })).d;
   const ops: unknown[] = [];
   for (let i = 0; i < n; i++) ops.push({ op: 'add_activity', id: `A${i}`, name: `A${i}`, duration_days: 3 + (i % 4) }, ...(i ? [{ op: 'add_relationship', pred: `A${i - 1}`, succ: `A${i}` }] : []));
   ops.push({ op: 'add_activity', id: 'M1', name: 'Done', type: 'finish_milestone' }, { op: 'add_relationship', pred: `A${n - 1}`, succ: 'M1' });

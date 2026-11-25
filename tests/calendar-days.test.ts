@@ -35,7 +35,7 @@ const OPS = [
 const WANT = { A: [5, 5, 0], B: [5, 5, 0], D: [2, 2, 9], C: [5, 5, 6] } as Record<string, number[]>;
 
 test('MCP: 5 d on a 10-h calendar reads back as 5 d in every result that shows days; the 8-h activity is unchanged', async () => {
-  const h = (await call('new_project', { id: 'CD', start: '2026-03-02' })).handle;
+  const h = (await call('new_project', { currency: 'USD', id: 'CD', start: '2026-03-02' })).handle;
   assert.equal((await call('edit', { handle: h, operations: OPS })).ok, true);
   assert.equal((await call('schedule', { handle: h })).finish, '2026-03-16 17:00');
   for (const [id, [o, r, tf]] of Object.entries(WANT)) {
@@ -69,7 +69,7 @@ test('MCP: 5 d on a 10-h calendar reads back as 5 d in every result that shows d
   const nothing = await call('import_excel', { handle: h, path: xlsx, dry_run: true });
   assert.deepEqual([nothing.applied, nothing.operations, nothing.notes, Object.entries(nothing.summary).filter(([k, v]) => k !== 'unchanged' && v !== 0)], [false, [], undefined, []], 'an unchanged file plans nothing');
   // compare: the edit of A from 5 to 6 days is 5 -> 6
-  const other = (await call('new_project', { id: 'CD', start: '2026-03-02' })).handle;
+  const other = (await call('new_project', { currency: 'USD', id: 'CD', start: '2026-03-02' })).handle;
   await call('edit', { handle: other, operations: [...OPS.slice(0, 1), { ...OPS[1], duration_days: 6 }, ...OPS.slice(2)] });
   const cmp = await call('compare', { handle: h, other_handle: other });
   assert.deepEqual(cmp.changes.filter((c: any) => c.field === 'original_duration' || c.field === 'remaining_duration' || c.field === 'lag').map((c: any) => [c.id, c.field, c.a, c.b]), [['A', 'original_duration', '5', '6'], ['A', 'remaining_duration', '5', '6']]);
@@ -78,7 +78,7 @@ test('MCP: 5 d on a 10-h calendar reads back as 5 d in every result that shows d
 /** The same project built by the core functions, edits with the given rule. */
 function project(calendarDays: boolean): Db {
   const db: Db = { tables: {} };
-  assert.equal(applyOps(db, [{ op: 'add_project', id: 'CD', start: '2026-03-02' }, ...OPS], { calendarDays }).ok, true);
+  assert.equal(applyOps(db, [{ op: 'add_project', currency: 'USD', id: 'CD', start: '2026-03-02' }, ...OPS], { calendarDays }).ok, true);
   assert.equal(scheduleProjects(db, [rows(db, 'PROJECT')[0].proj_id]).ok, true);
   return db;
 }

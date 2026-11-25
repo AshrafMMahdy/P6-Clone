@@ -89,7 +89,7 @@ test('M2: set_fields and add_row refuse an ID used twice, a parent cycle, an act
   ok(db, [{ op: 'delete_activity', id: 'ZA-1' }, { op: 'delete_activity', id: 'ZA1' }]);
   assert.equal(rows(db, 'TASK').filter((t) => t.proj_id === P.proj_id && t.task_code === 'X').length, 0, 'nothing changed');
   // the same ID in ANOTHER project is fine
-  ok(db, [{ op: 'add_project', id: 'OTHER', start: '2011-01-03' }]);
+  ok(db, [{ op: 'add_project', currency: 'USD', id: 'OTHER', start: '2011-01-03' }]);
   ok(db, [{ op: 'add_activity', project: 'OTHER', id: codes[0], name: 'same id, other project' }]);
   // a resource ID, a project ID, a WBS code under one parent
   ok(db, [{ op: 'add_resource', id: 'R-ONE' }, { op: 'add_resource', id: 'R-TWO' }]);
@@ -113,7 +113,7 @@ test('M2: set_fields and add_row refuse an ID used twice, a parent cycle, an act
   ok(db, [{ op: 'add_cost_account', id: 'CA1' }, { op: 'add_cost_account', id: 'CA2', parent: 'CA1' }]);
   const a1 = rows(db, 'ACCOUNT').find((a) => a.acct_short_name === 'CA1')!, a2 = rows(db, 'ACCOUNT').find((a) => a.acct_short_name === 'CA2')!;
   bad(db, [{ op: 'set_fields', table: 'ACCOUNT', where: { acct_id: a1.acct_id }, fields: { parent_acct_id: a2.acct_id } }], /The cost account CA1 would be its own ancestor/);
-  ok(db, [{ op: 'add_calendar', name: 'Cal A' }, { op: 'add_calendar', name: 'Cal B' }]);
+  ok(db, [{ op: 'add_calendar', name: 'Cal A', work_week: MON_FRI }, { op: 'add_calendar', name: 'Cal B', work_week: MON_FRI }]);
   const cA = rows(db, 'CALENDAR').find((c) => c.clndr_name === 'Cal A')!, cB = rows(db, 'CALENDAR').find((c) => c.clndr_name === 'Cal B')!;
   ok(db, [{ op: 'set_fields', table: 'CALENDAR', where: { clndr_id: cB.clndr_id }, fields: { base_clndr_id: cA.clndr_id } }]);
   bad(db, [{ op: 'set_fields', table: 'CALENDAR', where: { clndr_id: cA.clndr_id }, fields: { base_clndr_id: cB.clndr_id } }], /would be its own ancestor/);
@@ -132,7 +132,7 @@ test('M2: a changed project holding what P6 rejects is not saved (allow_invalid 
   const { callTool, toolResult } = await import('../mcp/server.ts');
   const call = async (name: string, args: Record<string, unknown>) => { const r = await callTool(name, args); return { err: r.isError, d: toolResult(r.out, r.isError).structuredContent as any }; };
   const dir = mkdtempSync(join(tmpdir(), 'p6-invalid-'));
-  const np = (await call('new_project', { id: 'INV', start: '2026-03-02' })).d;
+  const np = (await call('new_project', { currency: 'USD', id: 'INV', start: '2026-03-02' })).d;
   const H = { handle: np.handle, owner_key: np.owner_key };
   assert.equal((await call('edit', { ...H, operations: [{ op: 'add_activity', id: 'A1', name: 'a' }, { op: 'add_activity', id: 'A2', name: 'b' }] })).err, false);
   // a duplicate Activity ID made by a path set_fields refuses is made here by other means (the table written directly), as a file or a bug could: the net under it
@@ -158,7 +158,7 @@ test('copy_activities re-points TRSRCFIN at the copied assignment and copies the
   const P = live(db);
   const src = rows(db, 'TASKRSRC').find((a) => a.proj_id === P.proj_id)!;
   const t = rows(db, 'TASK').find((x) => x.task_id === src.task_id)!;
-  ok(db, [{ op: 'add_udf', name: 'Assign note', subject: 'assignment' }, { op: 'add_project', id: 'DEST', start: '2011-01-03' }]);
+  ok(db, [{ op: 'add_udf', name: 'Assign note', subject: 'assignment' }, { op: 'add_project', currency: 'USD', id: 'DEST', start: '2011-01-03' }]);
   const ut = rows(db, 'UDFTYPE').find((u) => u.udf_type_label === 'Assign note')!;
   addRow(db, 'UDFVALUE', { udf_type_id: ut.udf_type_id, fk_id: src.taskrsrc_id, proj_id: P.proj_id, udf_text: 'hello', udf_date: '', udf_number: '', udf_code_id: '' });
   db.tables.TRSRCFIN = { name: 'TRSRCFIN', fields: ['taskrsrc_id', 'task_id', 'proj_id', 'fin_dates_id', 'act_cost'], rows: [{ taskrsrc_id: src.taskrsrc_id, task_id: src.task_id, proj_id: P.proj_id, fin_dates_id: '', act_cost: '5' }] };
@@ -190,7 +190,7 @@ test('delete_code_type with project never deletes a global type of the same name
   ok(db, [{ op: 'delete_code_type', name: 'Phase' }]);
   assert.ok(!rows(db, 'ACTVTYPE').some((t) => t.actv_code_type === 'Phase'));
   // delete_calendar: a resource calendar cannot replace one activities use; a project calendar of another project cannot either
-  ok(db, [{ op: 'add_calendar', name: 'Old' }, { op: 'add_calendar', name: 'Resource cal' }, { op: 'add_calendar', name: 'Other project cal' }, { op: 'add_project', id: 'OTHER', start: '2011-01-03' }]);
+  ok(db, [{ op: 'add_calendar', name: 'Old', work_week: MON_FRI }, { op: 'add_calendar', name: 'Resource cal', work_week: MON_FRI }, { op: 'add_calendar', name: 'Other project cal', work_week: MON_FRI }, { op: 'add_project', currency: 'USD', id: 'OTHER', start: '2011-01-03' }]);
   const old = rows(db, 'CALENDAR').find((c) => c.clndr_name === 'Old')!, rc = rows(db, 'CALENDAR').find((c) => c.clndr_name === 'Resource cal')!, pc = rows(db, 'CALENDAR').find((c) => c.clndr_name === 'Other project cal')!;
   rc.clndr_type = 'CA_Rsrc';
   pc.clndr_type = 'CA_Project'; pc.proj_id = rows(db, 'PROJECT').find((p) => p.proj_short_name === 'OTHER')!.proj_id;
@@ -232,7 +232,7 @@ test('read_table keeps P6 XML elements with children, every repeated tag, and un
 test('get_activity does not cut notes; list_wbs goes as deep as the tree does', async () => {
   const { callTool, toolResult } = await import('../mcp/server.ts');
   const call = async (name: string, args: Record<string, unknown>) => { const r = await callTool(name, args); return { err: r.isError, d: toolResult(r.out, r.isError).structuredContent as any }; };
-  const np = (await call('new_project', { id: 'DEEP', start: '2026-03-02' })).d;
+  const np = (await call('new_project', { currency: 'USD', id: 'DEEP', start: '2026-03-02' })).d;
   const H = { handle: np.handle, owner_key: np.owner_key };
   const long = 'word '.repeat(400).trim(); // 1,999 characters
   const ops: unknown[] = [];
@@ -519,7 +519,7 @@ test('a project restored without the open-time list rebuilds it from the file it
   assert.equal(refused.d.error.code, 'invalid_for_p6');
   mine[3].task_code = 'FIXED-3';
   // no file to read it from (a project made in memory): nothing is refused, everything is listed, and the answer says it could not tell
-  const np = (await call('new_project', { id: 'MEM', start: '2026-03-02' })).d;
+  const np = (await call('new_project', { currency: 'USD', id: 'MEM', start: '2026-03-02' })).d;
   const N = { handle: np.handle, owner_key: np.owner_key };
   await call('edit', { ...N, operations: [{ op: 'add_activity', id: 'M1', name: 'a' }, { op: 'add_activity', id: 'M2', name: 'b' }] });
   const m = sessions.get(np.handle)!;
@@ -557,7 +557,7 @@ test('the server runs every tool when the folder it was started in is deleted (w
   try {
     await rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 't', version: '1' } });
     rmSync(cwd, { recursive: true, force: true }); // the folder the server was started in is gone
-    const np = (await tool('new_project', { id: 'P', start: '2026-03-02' })).d;
+    const np = (await tool('new_project', { currency: 'USD', id: 'P', start: '2026-03-02' })).d;
     const H = { handle: np.handle, owner_key: np.owner_key };
     assert.equal((await tool('edit', { ...H, operations: [{ op: 'add_activity', id: 'A', name: 'a', duration_days: 3 }, { op: 'add_activity', id: 'B', name: 'b', duration_days: 4 }, { op: 'add_relationship', pred: 'A', succ: 'B' }] })).err, false);
     for (const [name, a] of [['schedule', {}], ['monte_carlo', { iterations: 50, default_estimates: { min_pct: 90, max_pct: 125 } }], ['review', {}], ['export_pdf', { path: join(tmp, 'r.pdf') }], ['export_excel', { path: join(tmp, 'r.xlsx') }], ['run_report', { path: join(tmp, 'rep.pdf') }], ['save', { path: join(tmp, 'p.xer') }]] as const) {
@@ -578,6 +578,7 @@ test('the server runs every tool when the folder it was started in is deleted (w
 
 // ------------------------------------------------------------------ what a platform import found missing in read_table and the P6 XML writer
 import { readdirSync } from 'node:fs';
+const MON_FRI = Object.fromEntries(['mon', 'tue', 'wed', 'thu', 'fri'].map((d) => [d, [['08:00', '12:00'], ['13:00', '17:00']]]));   // (a calendar's week is given: add_calendar assumes none)
 
 test('read_table gives the XER\'s ERMHDR line (version, export date, who, from where, currency), also in list_tables', async () => {
   const { listTables, readTable } = await import('../core/query/rawtable.ts');
@@ -690,7 +691,7 @@ test('a percentage or elapsed lag converted to hours keeps the file\'s own value
 test('list_wbs gives each summary its original duration (project calendar, first start to last finish) and least total float', async () => {
   const { callTool, toolResult } = await import('../mcp/server.ts');
   const call = async (name: string, args: Record<string, unknown>) => { const r = await callTool(name, args); return { err: r.isError, d: toolResult(r.out, r.isError).structuredContent as any }; };
-  const np = (await call('new_project', { id: 'SUMD', start: '2026-03-02' })).d;   // a Monday; 8-hour Monday-Friday week
+  const np = (await call('new_project', { currency: 'USD', id: 'SUMD', start: '2026-03-02' })).d;   // a Monday; 8-hour Monday-Friday week
   const H = { handle: np.handle, owner_key: np.owner_key };
   const e = await call('edit', { ...H, operations: [{ op: 'add_wbs', code: 'A' }, { op: 'add_wbs', code: 'B' },
     { op: 'add_activity', id: 'A1', name: 'a1', wbs: 'A', duration_days: 5 }, { op: 'add_activity', id: 'A2', name: 'a2', wbs: 'A', duration_days: 3 },

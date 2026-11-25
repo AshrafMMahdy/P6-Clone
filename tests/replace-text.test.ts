@@ -225,7 +225,7 @@ test('an ID that would become the same as another is refused and nothing is chan
   // through the server: one undo takes the whole rename back
   const { callTool, toolResult } = await import('../mcp/server.ts');
   const call = async (name: string, args: Record<string, unknown>) => { const x = await callTool(name, args); return { err: x.isError, d: toolResult(x.out, x.isError).structuredContent as any }; };
-  const np = (await call('new_project', { id: 'RT', start: '2026-03-02' })).d;
+  const np = (await call('new_project', { currency: 'USD', id: 'RT', start: '2026-03-02' })).d;
   const H = { handle: np.handle, owner_key: np.owner_key };
   assert.equal((await call('edit', { ...H, operations: [{ op: 'add_activity', id: 'A1', name: 'Acme one' }, { op: 'add_activity', id: 'A2', name: 'Acme two' }] })).err, false);
   const e = await call('edit', { ...H, operations: [{ op: 'replace_text', pairs: [{ find: 'Acme', replace: 'Client' }] }] });

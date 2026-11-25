@@ -256,7 +256,7 @@ test('progress anomalies: not assessed without a data date; a status date makes 
   assert.deepEqual(ok.projects_without_data_date, []);
   // a scope of two projects, one without a data date: the one with is examined, the other is named
   const two = B.cleanChain();
-  applyOps(two.db, [{ op: 'add_project', id: 'NODD', start: '2026-02-02' }, { op: 'add_activity', id: 'Z', name: 'Z', duration_days: 3, project: 'NODD' }]);
+  applyOps(two.db, [{ op: 'add_project', currency: 'USD', id: 'NODD', start: '2026-02-02' }, { op: 'add_activity', id: 'Z', name: 'Z', duration_days: 3, project: 'NODD' }]);
   rows(two.db, 'PROJECT').find((p) => p.proj_short_name === 'NODD')!.last_recalc_date = '';
   const t = assessed(F.progressAnomalies(makeScope(two.db, { calendarDays: true })));
   assert.deepEqual(t.projects_without_data_date, ['NODD']);
@@ -293,7 +293,7 @@ test('variance: the slip classes (< 0 ahead, 0 on time, <= 5, <= 15, <= 30, more
 test('variance: working days on the activity\'s calendar (Monday to Friday, 8 hours): a finish pushed over a weekend is 1 working day, not 3', () => {
   const db = { tables: {} } as B.Built['db'];
   const r = applyOps(db, [
-    { op: 'add_project', id: 'WK', start: '2026-03-02' }, { op: 'add_activity', id: 'A', name: 'A', duration_days: 5 },
+    { op: 'add_project', currency: 'USD', id: 'WK', start: '2026-03-02' }, { op: 'add_activity', id: 'A', name: 'A', duration_days: 5 },
     { op: 'build_baseline', name: 'BL', assign_as: 'project', activities: [{ activity: 'A', start: '2026-03-02 08:00', finish: '2026-03-06 17:00', duration_days: 5 }] },
     { op: 'add_activity', id: 'N', name: 'New', duration_days: 2 }, { op: 'update_activity', id: 'A', duration_days: 6 }], { calendarDays: true });
   assert.ok(r.ok, JSON.stringify(r.error));

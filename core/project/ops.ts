@@ -5,6 +5,7 @@
 // "wbs_id:<id>" (the id add_wbs returns). Days are converted on the activity's own calendar (its hours per day).
 // Used by the command-line `edit` command and the MCP server.
 import { addField, dropIndexes, nextId, rowIndex, rows, table, tableCache, withIdCache, type Db, type Row } from '../db.ts';
+import { currencyId, currencyRow, setBaseCurrency, type CurrencySpec } from '../currency.ts';
 import { formatP6Date, parseP6Date } from '../dates.ts';
 import { calendarsWithNoWork, noWorkTimeText, p6num } from '../schedule/cpm.ts';
 import { CalendarHorizonError } from '../calendar/calendar.ts';
@@ -13,7 +14,7 @@ import { baselineWouldDuplicate, fieldNotUsed } from '../notes.ts';
 import { findLoops, MAX_LEN } from '../xer/validate.ts';
 import { parseScheduleOptions, writeScheduleOptions, SCHEDULE_OPTIONS_GUIDE } from '../schedule/options.ts';
 import { pick, realOf, record, removeWhere, rollback } from '../journal.ts';
-import { parseClndrData, scheduledCalendarDef, serializeClndrData, standardCalendar, type Shift } from '../calendar/clndr-data.ts';
+import { calendarDefOfRow, parseClndrData, scheduledCalendarDef, serializeClndrData, type CalendarDef, type Shift } from '../calendar/clndr-data.ts';
 import { assignResource, assignmentActuals, fitAssignmentsToDuration, recalcAssignment, recomputeCosts } from '../resource/assign.ts';
 import { copyProject } from './copy.ts';
 import { dayHours as dayHoursOf } from './units.ts';
@@ -93,16 +94,17 @@ const IN_BASELINE: Record<string, string[]> = {
   update_code_type: ['op', 'in_baseline', 'project', 'name', 'new_name', 'subject'],
   update_code_value: ['op', 'in_baseline', 'project', 'type', 'code', 'new_code', 'name', 'subject'],
 };
-export const OP_NAMES = ['add_project', 'copy_project', 'set_project', 'set_schedule_options', 'set_predecessors', 'add_calendar', 'add_holidays', 'add_wbs', 'delete_wbs', 'add_activity', 'update_activity', 'delete_activity', 'dissolve_activity', 'add_relationship', 'update_relationship', 'delete_relationship', 'add_resource', 'assign_resource', 'assign_role', 'unassign_resource', 'link_activities', 'renumber_activities', ...EXTRA_OP_NAMES];
+export const OP_NAMES = ['add_project', 'copy_project', 'set_project', 'set_schedule_options', 'set_predecessors', 'set_currency', 'add_calendar', 'add_holidays', 'add_wbs', 'delete_wbs', 'add_activity', 'update_activity', 'delete_activity', 'dissolve_activity', 'add_relationship', 'update_relationship', 'delete_relationship', 'add_resource', 'assign_resource', 'assign_role', 'unassign_resource', 'link_activities', 'renumber_activities', ...EXTRA_OP_NAMES];
 
 /** The operations as an AI model needs to know them (fields, units, codes). Kept here, next to the code it describes. */
 export const OP_GUIDE = [
   'Operations (JSON objects with "op"; [x] = optional; durations, remaining and lags in days of the activity\'s own calendar (lags: the relationship-lag calendar, by default the predecessor\'s), or *_hours; dates "2026-03-02" or "2026-03-02 08:00"; "project" may be left out when one project is meant; an activity read from a Microsoft Project file may be named "uid:<task UID>" instead of its ID; a WBS element may be named "wbs_id:<id>" (the id add_wbs returns) instead of its code):',
-  `add_project: id, start, [name], [must_finish_by], [calendar]`,
+  `add_project: id, start, [name], [must_finish_by], [calendar], [currency] (the file's base currency, when it has none yet: an ISO 4217 code such as "EUR"; every project of a file shares it)`,
+  `set_currency: code (ISO 4217, e.g. "EUR"), [name], [symbol], [decimal_places], [decimal_symbol], [group_symbol]: the file's base currency, as P6's Admin > Currencies edits it (every cost of the file is in it). Amounts are not converted`,
   `copy_project: from (project ID to copy), id (new project ID), [name], [start] (moves every planned date by the same amount), [keep_progress] (default false: actuals and % complete cleared). Copies WBS, activities, logic, resource assignments, codes, UDFs and notebooks; the copy is then edited like any project`,
   `set_schedule_options: [project], then any of ${SCHEDULE_OPTIONS_GUIDE}. Written to the project (P6's Schedule Options), used by every later schedule`,
   `set_project: [project], [name], [data_date], [planned_start], [must_finish_by], [calendar], [financial_period_calendar] (the calendar of financial periods the project reports on; "" = the default), [eps] (EPS ID), [new_id] (a new Project ID, at most 40 characters; the root WBS node's code follows), [new_proj_id] (a new internal project number, the proj_id the XER carries: a positive whole number no other project has; every reference to the project follows)`,
-  `add_calendar: name, [work_week {"mon":[["08:00","12:00"],["13:00","17:00"]], ... "sat":[]}] (default Mon-Fri 8h), [holidays [dates]], [work_exceptions {date: periods}]`,
+  `add_calendar: name, copy_from (a calendar to copy: its week, exceptions and hours per period, as P6's Add copies one) and/or work_week {"mon":[["08:00","12:00"],["13:00","17:00"]], ... "sat":[]} (replaces the copied week) — one of the two is needed, a new calendar has no week of its own; [holidays [dates]], [work_exceptions {date: periods}]`,
   `add_holidays: calendar, dates [dates]`,
   `add_wbs: code, [name], [parent] (parent WBS code, dotted path or wbs_id:<id>; omit for top level), [project]. Returns wbs_id. P6 needs WBS codes unique under one parent, so a sibling with the same code is refused`,
   `delete_wbs: code, [keep_logic] (default true: every predecessor of the removed activities is linked on to their successors, so the chain stays closed; false = just delete), [project]. Removes the WBS element, its child elements and all their activities: the way to remove whole floors or areas, e.g. from a copied project`,
@@ -305,7 +307,14 @@ function applyOne(db: Db, op: Op, hpd: number, warnings: string[], batch: Batch)
     case 'add_project': {
       const id = str(op.id, 'id');
       if (rows(db, 'PROJECT').some((p) => p.proj_short_name.toLowerCase() === id.toLowerCase())) fail(`A project or baseline "${id}" already exists.`);
-      const pid = newProject(db, { id, name: typeof op.name === 'string' ? op.name : id, start: date(op.start, 'start') });
+      // the file's base currency (P6: one for the database, every project's costs in it): taken from the first project made, never assumed
+      if (op.currency != null) {
+        let want: string;
+        try { want = currencyRow(op.currency as CurrencySpec).curr_short_name; } catch (e) { fail((e as Error).message); }
+        const had = currencyId(db);
+        if (had && had !== want!) fail(`The file's base currency is ${had}: every project of a file keeps its costs in it (P6 has one base currency). Leave currency out, or change it for the whole file with set_currency.`);
+      }
+      const pid = newProject(db, { id, name: typeof op.name === 'string' ? op.name : id, start: date(op.start, 'start'), ...(op.currency != null ? { currency: op.currency as CurrencySpec } : {}) });
       if (op.must_finish_by) rows(db, 'PROJECT').find((p) => p.proj_id === pid)!.plan_end_date = date(op.must_finish_by, 'must_finish_by');
       if (op.calendar) rows(db, 'PROJECT').find((p) => p.proj_id === pid)!.clndr_id = calendar(op.calendar).clndr_id;
       return { project: id };
@@ -356,8 +365,15 @@ function applyOne(db: Db, op: Op, hpd: number, warnings: string[], batch: Batch)
     case 'add_calendar': {
       const name = str(op.name, 'name');
       if (rows(db, 'CALENDAR').some((c) => c.clndr_name.toLowerCase() === name.toLowerCase())) fail(`Calendar "${name}" already exists.`);
-      ensureDefaultCalendar(db);
-      const def = standardCalendar();
+      // P6 has no week of its own for a new calendar: Add copies a calendar the user picks (Select Calendar to Copy From). So the week is
+      // the calendar copied (its week, exceptions and hours per period) or the one given; with neither, nothing is assumed.
+      if (op.copy_from == null && op.work_week == null) {
+        const have = rows(db, 'CALENDAR').map((c) => c.clndr_name);
+        fail(`add_calendar needs copy_from (a calendar to copy, as P6's Add copies one) or work_week — a new calendar has no week of its own.${have.length ? ` Calendars to copy: ${have.map((n) => `"${n}"`).join(', ')}.` : ' The file has no calendar yet: give work_week.'}`);
+      }
+      const from = op.copy_from != null ? calendar(op.copy_from) : null;
+      let def: CalendarDef = { week: DAYS.map((): Shift[] => []), exceptions: new Map() };
+      if (from) { try { def = calendarDefOfRow(from); } catch (e) { fail(`Calendar "${from.clndr_name}" cannot be copied: its data cannot be read (${(e as Error).message}).`); } }
       if (op.work_week != null) {
         if (typeof op.work_week !== 'object') fail('"work_week" must map days (sun..sat) to lists of ["08:00","17:00"] periods.');
         def.week = DAYS.map(() => []);
@@ -373,8 +389,25 @@ function applyOne(db: Db, op: Op, hpd: number, warnings: string[], batch: Batch)
       const C = table(db, 'CALENDAR');
       const weekH = def.week.flat().reduce((a, s) => a + s.end - s.start, 0) / 60;
       const dayH = Math.round((weekH / Math.max(1, def.week.filter((d) => d.length).length)) * 100) / 100;
-      C.rows.push({ clndr_id: String(nextId(db, 'CALENDAR')), default_flag: 'N', clndr_name: name, proj_id: '', base_clndr_id: '', last_chng_date: formatP6Date(Date.now() / 60000), clndr_type: 'CA_Base', day_hr_cnt: p6num(dayH), week_hr_cnt: p6num(weekH), month_hr_cnt: p6num(weekH * 4.3), year_hr_cnt: p6num(weekH * 52), rsrc_private: 'N', clndr_data: serializeClndrData(def) });
-      return { calendar: name, hours_per_week: weekH };
+      // the hours per time period: the copied calendar's, when its week is kept; worked out from the week given otherwise
+      const own = from && op.work_week == null;
+      C.rows.push({ clndr_id: String(nextId(db, 'CALENDAR')), default_flag: C.rows.length ? 'N' : 'Y', clndr_name: name,   // (a file's first calendar is its default, as P6 always has one)
+        proj_id: '', base_clndr_id: '', last_chng_date: formatP6Date(Date.now() / 60000), clndr_type: 'CA_Base',
+        day_hr_cnt: own ? from.day_hr_cnt : p6num(dayH), week_hr_cnt: own ? from.week_hr_cnt : p6num(weekH), month_hr_cnt: own ? from.month_hr_cnt : p6num(weekH * 4.3), year_hr_cnt: own ? from.year_hr_cnt : p6num(weekH * 52), rsrc_private: 'N', clndr_data: serializeClndrData(def) });
+      const hhmm = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+      const week = Object.fromEntries(DAYS.map((d, i) => [d, def.week[i].map((x) => `${hhmm(x.start)}-${hhmm(x.end)}`)]));
+      return { calendar: name, ...(from ? { copied_from: from.clndr_name } : {}), work_week: week, hours_per_week: weekH };
+    }
+    case 'set_currency': {
+      // P6: Admin > Currencies, the base currency edited in place (its ID, name, symbol and formats). Amounts are not converted.
+      if (op.code == null) fail('set_currency needs code: the currency\'s ISO 4217 code (EUR, GBP, SAR, AED, USD …).');
+      const spec: CurrencySpec = { code: str(op.code, 'code'), ...(op.name != null ? { name: str(op.name, 'name') } : {}), ...(op.symbol != null ? { symbol: String(op.symbol) } : {}),
+        ...(op.decimal_places != null ? { decimal_places: Number(op.decimal_places) } : {}), ...(op.decimal_symbol != null ? { decimal_symbol: String(op.decimal_symbol) } : {}), ...(op.group_symbol != null ? { group_symbol: String(op.group_symbol) } : {}) };
+      let r!: ReturnType<typeof setBaseCurrency>;
+      try { r = setBaseCurrency(db, spec); } catch (e) { fail((e as Error).message); }
+      const now = r.now.curr_short_name;
+      return { currency: now, name: r.now.curr_type, symbol: r.now.curr_symbol, decimal_places: Number(r.now.decimal_digit_cnt),
+        ...(r.was && r.was !== now ? { was: r.was, note: `Amounts are not converted: every cost keeps its number, now read in ${now} (P6 changes its base currency the same way).` } : {}) };
     }
     case 'add_holidays': {
       const c = calendar(op.calendar);

@@ -6,6 +6,7 @@
 // secondary constraint) travels in task Text fields, the way P6 itself maps extra fields on MS Project export.
 // Each task's UID is kept on its activity / WBS row (_msp_uid, never written to XER or P6 XML) so that callers can
 // match activities to the file, and writing Microsoft Project again gives those tasks their original UIDs.
+import { currencyRow } from '../currency.ts';
 import { addField, rows, table, type Db, type Row } from '../db.ts';
 import type { Finding } from '../findings.ts';
 import { droppedOnSave } from '../notes.ts';
@@ -97,6 +98,8 @@ export interface MProject {
   minutesPerWeek: number;
   /** MS Project "split in-progress tasks" ~ P6 Retained Logic. */
   splitsInProgress: boolean | null;
+  /** The file's currency (Project CurrencyCode, CurrencySymbol, CurrencyDigits): P6's base currency of the converted file. */
+  currency?: { code: string; symbol?: string; digits?: number };
   criticalHrs: number;
   /** whose rules made the dates: a P6 build (written by the clone from P6) or Microsoft Project (resume: its rule for
    *  the remaining work of started tasks) */
@@ -445,6 +448,12 @@ export function projectToDb(m: MProject, findings: Finding[], source: string): D
       info('MSP_NO_CALENDAR', `${source} defines no calendars; a Standard 5-day calendar was created.`, 'P6 assigns its default global calendar.');
     }
     rows(db, 'CALENDAR').forEach((c) => (c.default_flag = c.clndr_id === projCal ? 'Y' : 'N'));
+  }
+
+  // the file's currency, as its base currency (never assumed: a file that names none has none)
+  if (m.currency?.code) {
+    try { push('CURRTYPE', currencyRow({ code: m.currency.code, ...(m.currency.symbol ? { symbol: m.currency.symbol } : {}), ...(m.currency.digits != null ? { decimal_places: m.currency.digits } : {}) })); }
+    catch (e) { info('MSP_CURRENCY', `${source} names its currency "${m.currency.code}": ${(e as Error).message} No base currency was set: set it with edit set_currency.`, 'P6 keeps an imported project\'s costs in its database\'s base currency.'); }
   }
 
   // Project

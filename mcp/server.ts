@@ -80,6 +80,7 @@ import { reportHtml, reportPages, reportText, reportXlsx } from '../renderer/rep
 import { nowStamp } from '../core/report/reports.ts';
 import { defaultEstimates, runMonteCarlo, type MonteCarloOptions, type Sampler } from '../core/risk/montecarlo.ts';
 import { claimHere, keptPlace, IterationFile, keepWords, type Claim } from './keptRuns.ts';
+import { baseCurrency, currencyId } from '../core/currency.ts';
 import { DEFAULT_FOLDER, defaultResultFolder, exportAfterChange, exportDoc, exportFolder, exportName, exportNameProp, exportOf, exportProp, exportResult, noteCuts, RESULT_FILE_TOOLS } from './export.ts';
 import { LISTED } from '../core/analysis/common.ts';
 import { criticalityNote, sensitivityNote } from './mcNotes.ts';
@@ -108,7 +109,7 @@ const ERRORS_DOC = ' Errors come back as {error: {code, reason, next_step, retry
 
 const TOOLS = [
   { name: 'open_file', annotations: edit, description: 'Open an XER, P6 XML, Microsoft Project XML, MPX or Microsoft Project .mpp file (read without Microsoft Project, through MPXJ) and get a handle (for editing) and an owner_key (for save, close and undoing others\' changes). Returns P6 import diagnostics and a project summary. A file P6 would reject is refused (error p6_would_reject, with the fatal findings) unless lenient: true, which opens it anyway when its data could be read (the answer to the refusal says what P6 refuses, by kind and count, and how to carry on; the lenient answer says in file_as_given that the original is one P6 would refuse, and the user is to be told) and repairs what it safely can (a misspelled key column with unique ids is renamed; empty, missing or repeated ids nothing points at get fresh ones): diagnostics.repaired lists each repair, the notes say what was left and what to do about it, and still_rejected says whether a save would still be refused by P6. Nothing is written until save. Large files can take a while: pass async: true to get a job_id.' + ERRORS_DOC, inputSchema: { type: 'object', properties: { path: { type: 'string' }, hours_per_day: { type: 'number' }, lenient: { type: 'boolean', description: 'open a file P6 would reject, to repair it' }, encoding: { type: 'string', description: 'XER/MPX text encoding (default: recognised automatically): windows-1252, windows-1256 (Arabic), windows-1251, windows-1253, windows-1255, windows-1250, windows-1254, gbk, big5, shift_jis, utf-8' }, ...common }, required: ['path'] } },
-  { name: 'new_project', annotations: edit, description: 'Start a new, empty project in memory (WBS root, default calendar, P6 schedule options); returns handle and owner_key.', inputSchema: { type: 'object', properties: { id: { type: 'string', description: 'Project ID' }, name: { type: 'string' }, start: { type: 'string', description: 'Planned start YYYY-MM-DD' }, must_finish_by: { type: 'string', description: 'Must finish by (YYYY-MM-DD): late dates and float are measured to it' }, hours_per_day: { type: 'number' }, ...common }, required: ['id', 'start'] } },
+  { name: 'new_project', annotations: edit, description: 'Start a new, empty project in memory (WBS root, a default calendar "Standard 5 Day Workweek", Mon–Fri 8 h, which new activities take as P6 gives a new project its default calendar (add_calendar, update_calendar and set_project calendar change it), P6 schedule options, the base currency given); returns handle and owner_key.', inputSchema: { type: 'object', properties: { id: { type: 'string', description: 'Project ID' }, name: { type: 'string' }, start: { type: 'string', description: 'Planned start YYYY-MM-DD' }, must_finish_by: { type: 'string', description: 'Must finish by (YYYY-MM-DD): late dates and float are measured to it' }, hours_per_day: { type: 'number' }, currency: { description: 'The base currency every cost is kept in (P6 asks for it when its database is set up): an ISO 4217 code ("EUR", "GBP", "SAR" …), or {code, [name], [symbol], [decimal_places], [decimal_symbol], [group_symbol]}. Changed later with edit set_currency.' }, ...common }, required: ['id', 'start', 'currency'] } },
   { name: 'compute_schedule', annotations: ro, description: `Compute a schedule from a description, with no handle and nothing kept: P6's F9 (calendars, constraints, milestones, progress, retained logic and the other schedule options) on the activities and links given. Takes: ${COMPUTE_GUIDE}.`, inputSchema: { type: 'object', properties: { start: { type: 'string' }, data_date: { type: 'string' }, must_finish_by: { type: 'string' }, hours_per_day: { type: 'number' }, calendar: { type: 'string' }, calendars: { type: 'array', items: { type: 'object' } }, activities: { type: 'array', items: { type: 'object' } }, relationships: { type: 'array', items: { type: 'object' } }, options: { type: 'object' }, break_loops: { type: 'boolean' }, offset: { type: 'number' }, limit: { type: 'number' }, names: { type: 'boolean' }, ...common }, required: ['start', 'activities'] } },
   { name: 'list_open', annotations: ro, description: 'Projects open in memory, and projects moved out of memory to recovery files (they come back on their next call).', inputSchema: { type: 'object', properties: {} } },
   { name: 'server_status', annotations: ro, description: 'Memory use and budget, limits, open projects (busy, idle, unsaved), projects moved out, running jobs, and reasoner: whether the schedule reasoner (optimize_schedule) loaded, its model and runtime, or why not (checked in the background: the first call after the server starts may say checking: true, loaded: null).', inputSchema: { type: 'object', properties: {} } },
@@ -546,9 +547,13 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
       }
       return r.ok ? r : { ok: false, error: { ...r.error, hint: r.error.code === 'schedule_failed' ? 'Fix the reported problem (or pass break_loops: true for loops) and call again.' : 'Fix that part of the input (where says which) and call again.' } }; }
     case 'new_project': {
+      // the file's base currency (P6 asks for it when the database is set up): given, never assumed — but for the model-only workspace
+      // open_model makes for a model with no schedule (no costs: it has none until set_currency)
+      const modelOnly = (a as Record<symbol, unknown>)[MODEL_ONLY] === true;
+      if (a.currency == null && !modelOnly) fail('bad_input', 'new_project needs currency: the base currency every cost of the project is kept in, as an ISO 4217 code ("EUR", "GBP", "SAR" …).', 'Give currency: the project\'s currency code (or {code, symbol, decimal_places, …}).');
       const db: Db = { tables: {} };
-      const r = applyOps(db, [{ op: 'add_project', id: a.id, name: a.name ?? a.id, start: a.start, ...(a.must_finish_by ? { must_finish_by: a.must_finish_by } : {}) }]);
-      if (!r.ok) fail('bad_input', r.error!.message, 'Give id (Project ID) and start (YYYY-MM-DD).');
+      const r = applyOps(db, [{ op: 'add_project', id: a.id, name: a.name ?? a.id, start: a.start, ...(a.must_finish_by ? { must_finish_by: a.must_finish_by } : {}), ...(a.currency != null ? { currency: a.currency } : {}) }]);
+      if (!r.ok) fail('bad_input', r.error!.message, 'Give id (Project ID), start (YYYY-MM-DD) and currency (an ISO 4217 code).');
       const s = createSession(db, { path: null, format: 'xer', hpd: Number(a.hours_per_day) || 8, bytes: 8 * 1048576, dirty: true });
       s.openProblems = new Map(); // (nothing in it yet: whatever a later edit leaves that P6 rejects is that edit's)
       return { handle: s.handle, owner_key: s.ownerKey, project: a.id };
@@ -957,6 +962,8 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
       else if (fmt === 'mspdi') label = 'Microsoft Project XML';
       else if (fmt === 'mpx') { bytes = exportFile(s.db, fmt as Format, { version: '', projIds: projIds ?? allIds(s.db).slice(0, 1), encoding: a.encoding ?? 'auto', readAs: s.encoding, report: notes }); label = fmt === 'mpx' ? 'MPX' : 'Microsoft Project XML'; }
       else if (fmt === 'xer') {
+        // an XER names the currency its costs are in: a file that names none (a project made with none, a converted file that named none) is not written as one
+        if (!s.db.header?.raw && !baseCurrency(s.db)) fail('no_currency', 'The file names no base currency, and an XER names the currency its costs are in.', 'Set it first with edit set_currency (an ISO 4217 code such as "EUR"), then save.');
         // the label is the version written; a project without one is stamped NEW_XER_VERSION, and the answer says what that means
         const stamped = a.version == null && s.db.header?.version == null;
         const o = { version: a.version ?? s.db.header?.version ?? NEW_XER_VERSION, encoding: a.encoding ?? 'auto', readAs: s.encoding, projIds, report: notes };
@@ -1252,7 +1259,7 @@ async function callToolRun(name: string, a: Record<string, any>, sessionCaller?:
   const discardKept = name === 'open_model' && a.discard_kept === true;
   if (name === 'open_model' && !discardKept && (a.handle == null || a.handle === '') && typeof a.path === 'string') {
     const id = (basename(a.path).replace(/\.[^.]+$/, '').replace(/[^A-Za-z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 20) || 'MODEL').toUpperCase();
-    const np = await callToolRun('new_project', { id, start: new Date().toISOString().slice(0, 10), ...(a.caller ? { caller: a.caller } : {}) }, sessionCaller, signal);
+    const np = await callToolRun('new_project', { id, start: new Date().toISOString().slice(0, 10), ...(a.caller ? { caller: a.caller } : {}), [MODEL_ONLY]: true }, sessionCaller, signal);
     if (np.isError) return np;
     const ws = np.out as { handle: string; owner_key: string };
     const r = await callToolRun('open_model', { ...a, handle: ws.handle, owner_key: ws.owner_key }, sessionCaller, signal, progress);
@@ -1286,6 +1293,16 @@ async function callToolRun(name: string, a: Record<string, any>, sessionCaller?:
       const own = Array.isArray((out as { notes?: unknown }).notes) ? (out as { notes: string[] }).notes : [];
       if (said.length) out = { ...(out as object), notes: [...said, ...(said.some((x) => / in (?:its|their) logic \(/.test(x)) ? own.filter((n) => !isShortLoopNote(n)) : own)] };
     }
+    // the file's base currency, where an answer gives costs and where a file is opened or made (P6 keeps every cost in it); none named: said in the notes
+    const hc = handle ?? (plain && typeof (out as { handle?: unknown }).handle === 'string' ? (out as { handle: string }).handle : undefined);
+    if (plain && hc && namesCurrency(name, a) && !(out as { error?: unknown }).error && !(out as { job_id?: unknown }).job_id) {
+      let db: Db | undefined;
+      try { db = getSession(hc).db; } catch { db = undefined; }
+      if (db) {
+        const c = currencyId(db), own = Array.isArray((out as { notes?: unknown }).notes) ? (out as { notes: string[] }).notes : [];
+        out = { ...(out as object), currency: c, ...(c ? {} : { notes: [...own, 'The file names no base currency: its costs are plain numbers. Set it with edit set_currency (an ISO 4217 code such as "EUR").'] }) };
+      }
+    }
     // the notes of the answer as they are told: each sentence once, parts not assessed for one reason in one sentence (core/notes.ts tidyNotes); an answer with none carries no `notes`
     if (plain && out && typeof out === 'object' && !Array.isArray(out) && Array.isArray((out as { notes?: unknown }).notes)) { const t = tidyNotes((out as { notes: string[] }).notes); if (t.length) (out as { notes: string[] }).notes = t; else delete (out as { notes?: unknown }).notes; }
     // a tool that can change a project says whether that project now has unsaved changes
@@ -1315,6 +1332,20 @@ async function callToolRun(name: string, a: Record<string, any>, sessionCaller?:
     const e = asRefusal(e0) as Error;
     if (e instanceof ToolError) return { out: { error: keptNote(contractError({ code: e.code, message: e.message, hint: e.hint, ...(e.retryAfter ? { retry_after: e.retryAfter } : {}), ...(e.data ?? {}) }), handle) }, isError: true };
     return { out: { error: contractError({ code: 'internal', message: `Not done: the server failed (${(e as Error).message}); the project was not changed by this call.`, hint: 'Report it with this message.', detail: String((e as Error).stack ?? e).split('\n').slice(0, 4).join(' | ') }) }, isError: true };
+  }
+}
+
+/** The marker of new_project's model-only workspace (open_model with no handle): a symbol on the call's arguments, never a key a caller can send. */
+const MODEL_ONLY = Symbol('model-only workspace');
+/** The answers that carry the file's base currency: those that give costs (in the variant that gives them), and the open and new file's. */
+function namesCurrency(name: string, a: Record<string, any>): boolean {
+  switch (name) {
+    case 'open_file': case 'new_project': case 'earned_value': case 'resource_summary': case 'evaluate_batch': case 'crash_schedule': return true;
+    case 'progress_curves': return (a.units ?? 'cost') === 'cost';
+    case 'resource_histogram': return a.cost === true;
+    case 'optimize_schedule': return a.objective === 'min_crash_cost';
+    case 'activity_table': return a.of === 'assignments';
+    default: return false;
   }
 }
 
@@ -1367,7 +1398,8 @@ export function saveUnsavedAtExit(reason: string): string[] {
     const dir = writeBase() ?? (path ? dirname(path) : safeCwd());
     let file = join(dir, `${name}.recovered-${stamp}.xer`);
     for (let i = 2; existsSync(file) || saved.includes(file); i++) file = join(dir, `${name}.recovered-${stamp}-${i}.xer`);
-    try { writeOutWith(file, (put) => writeXerTo(db, { version: db.header?.version ?? NEW_XER_VERSION, encoding: 'auto', readAs }, put)); saved.push(file); process.stderr.write(`P6 Clone: unsaved changes of ${handle} saved to ${file} (${reason})\n`); }
+    // (unsaved work is kept whatever the file names: a file with no base currency is written with none named — the clone reads it back as it was)
+    try { writeOutWith(file, (put) => writeXerTo(db, { version: db.header?.version ?? NEW_XER_VERSION, encoding: 'auto', readAs, ...(baseCurrency(db) ? {} : { currency: '' }) }, put)); saved.push(file); process.stderr.write(`P6 Clone: unsaved changes of ${handle} saved to ${file} (${reason})\n`); }
     catch (e) { process.stderr.write(`P6 Clone: the unsaved changes of ${handle} could not be saved (${reason}): ${(e as Error).message}\n`); return; }
     // the 4D model / links (XER has no place for them) and the LOB plans' copy go beside it, as an explicit save writes them
     try { save4dSidecar(db, file, allIds(db), writeOut); const lob = lobSidecarText(db, allIds(db)); if (lob) writeOut(`${file}.lob.json`, lob); }

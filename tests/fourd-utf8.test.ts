@@ -16,7 +16,7 @@ const call = async (name: string, args: Record<string, unknown>) => {
 };
 const ACTS = [['B1W', 'Basement Walls (B1 — perimeter RC)', 'Level 1', 'IfcWall'], ['L2S', 'بلاطة الطابق الثاني', 'Level 2', 'IfcSlab'], ['L2W', 'Level 2 walls', 'Level 2', 'IfcWall']] as const;
 async function project(id: string, model: string, link: boolean) {
-  const np = (await call('new_project', { id, start: '2026-03-02' })).d;
+  const np = (await call('new_project', { currency: 'USD', id, start: '2026-03-02' })).d;
   const h = np.handle, owner_key = np.owner_key;
   await call('edit', { handle: h, owner_key, operations: ACTS.map(([a, n]) => ({ op: 'add_activity', id: a, name: n, duration_days: 5 })) });
   await call('schedule', { handle: h, owner_key });

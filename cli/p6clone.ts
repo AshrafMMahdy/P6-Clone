@@ -41,7 +41,8 @@ const USAGE = `p6clone <command> [options]
   1255, 1250, GBK, Big5, Shift_JIS, UTF-8); --encoding <name> forces one when reading, --out-encoding when writing
   (default: the code page P6 would use for the text).
 
-  new      --id P1 --name "Tower A" --start 2026-03-01 --out p1.xer [--version 19.12]
+  new      --id P1 --name "Tower A" --start 2026-03-01 --currency EUR --out p1.xer [--version 19.12]
+           (--currency: the base currency costs are kept in, an ISO 4217 code: never assumed)
   edit     <file.xer> --ops ops.json|- --out out.xer [--schedule] [--data-date D] [--hours-per-day 8] [--json]
            Operations (JSON array, applied as one transaction): add_project, set_project, add_calendar,
            add_holidays, add_wbs, add_activity, update_activity, delete_activity, dissolve_activity,
@@ -153,7 +154,9 @@ async function main(): Promise<number> {
       if (!out) throw new Error('--out required');
       const db: Db = { tables: {} };
       const id = opt('id') ?? 'NEW';
-      const r = applyOps(db, [{ op: 'add_project', id, name: opt('name') ?? id, start: opt('start') ?? new Date().toISOString().slice(0, 10) }]);
+      const currency = opt('currency');
+      if (!currency) throw new Error('--currency required: the base currency costs are kept in, an ISO 4217 code (EUR, GBP, SAR …)');
+      const r = applyOps(db, [{ op: 'add_project', id, name: opt('name') ?? id, start: opt('start') ?? new Date().toISOString().slice(0, 10), currency }]);
       if (!r.ok) { console.error(r.error!.message); return 65; }
       writeOut(out, db, opt('version'));
       if (flag('json')) console.log(JSON.stringify({ ok: true, project: id, out }));

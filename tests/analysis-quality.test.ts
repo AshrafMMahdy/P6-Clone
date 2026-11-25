@@ -15,7 +15,7 @@ const sched = (db: Db) => { const r = scheduleProjects(db, [pid(db)]); assert.ok
 function build(): Db {
   const db: Db = { tables: {} };
   ok(db, [
-    { op: 'add_project', id: 'Q', start: '2026-03-02' },
+    { op: 'add_project', currency: 'USD', id: 'Q', start: '2026-03-02' },
     { op: 'add_activity', id: 'S', name: 'Start', type: 'start_milestone' },
     { op: 'add_activity', id: 'A', name: 'Design', duration_days: 5 },
     { op: 'add_activity', id: 'B', name: 'Procure', duration_days: 10 },

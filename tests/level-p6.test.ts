@@ -11,7 +11,7 @@ import { testRoots } from './helpers.ts';
 testRoots();
 const call = async (name: string, args: Record<string, unknown>) => { const r = await callTool(name, args); return toolResult(r.out, r.isError, name).structuredContent as any; };
 async function project(start: string, ops: unknown[]) {
-  const p = await call('new_project', { id: 'LV', start });
+  const p = await call('new_project', { currency: 'USD', id: 'LV', start });
   const e = await call('edit', { handle: p.handle, operations: ops });
   assert.ok(e.ok !== false && !e.error, JSON.stringify(e.error));
   const s = await call('schedule', { handle: p.handle });

@@ -16,7 +16,7 @@ const dir = mkdtempSync(join(tmpdir(), 'p6stamp-'));
 const head = (p: string) => readFileSync(p, 'latin1').split(/\r?\n/)[0].split('\t');
 
 test('a new project is saved as XER 7.0 and, opened again, finishes on the same date', async () => {
-  const np = await call('new_project', { id: 'NEW', start: '2026-03-02' });
+  const np = await call('new_project', { currency: 'USD', id: 'NEW', start: '2026-03-02' });
   const ops: unknown[] = [];
   for (let i = 0; i < 6; i++) ops.push({ op: 'add_activity', id: `A${i}`, name: `A${i}`, duration_days: 2 + i }, ...(i ? [{ op: 'add_relationship', pred: `A${i - 1}`, succ: `A${i}`, type: i % 2 ? 'FS' : 'FF', lag_days: i % 3 }] : []));
   assert.equal((await call('edit', { handle: np.handle, owner_key: np.owner_key, operations: ops })).ok, true);

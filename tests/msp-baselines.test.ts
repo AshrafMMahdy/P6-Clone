@@ -19,7 +19,7 @@ test('Microsoft Project Baseline and Baseline1-10 come in as saved baselines, an
 
   // a project of the clone's with five saved baselines: Baseline, Baseline1-3 and Baseline4 in the file
   const d: Db = { tables: {} };
-  assert.ok(applyOps(d, [{ op: 'add_project', id: 'MB', start: '2026-03-02' }, { op: 'add_activity', id: 'A', name: 'A', duration_days: 5 }]).ok);
+  assert.ok(applyOps(d, [{ op: 'add_project', currency: 'USD', id: 'MB', start: '2026-03-02' }, { op: 'add_activity', id: 'A', name: 'A', duration_days: 5 }]).ok);
   const pid = rows(d, 'PROJECT')[0].proj_id;
   scheduleProjects(d, [pid]);
   const ops: unknown[] = [];

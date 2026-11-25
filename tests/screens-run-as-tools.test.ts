@@ -37,7 +37,7 @@ const ok = (r: ToolAnswer) => { assert.equal(r.isError, false, JSON.stringify(r.
 
 /** A project P: A (10 d) then B (5 d), both with a three-point estimate, scheduled. */
 async function mcProject() {
-  const np = (await run('new_project', { id: 'P', start: '2026-03-02' })).out as any;
+  const np = (await run('new_project', { currency: 'USD', id: 'P', start: '2026-03-02' })).out as any;
   ok(await run('edit', { handle: np.handle, owner_key: np.owner_key, operations: [
     { op: 'add_activity', id: 'A', name: 'A', duration_days: 10 }, { op: 'add_activity', id: 'B', name: 'B', duration_days: 5 }, { op: 'add_relationship', pred: 'A', succ: 'B' },
     { op: 'set_estimates', activity: 'A', min_days: 8, most_likely_days: 10, max_days: 20 }, { op: 'set_estimates', activity: 'B', min_days: 4, most_likely_days: 5, max_days: 9 },
@@ -100,7 +100,7 @@ test('Monte Carlo: Cancel shows the iterations done (the tool’s partial answer
 
 /** A chain of n activities of 10 days: with no crash data every one may lose 3 days, one step each. */
 async function chain(n: number) {
-  const np = (await run('new_project', { id: 'CH', start: '2026-03-02' })).out as any;
+  const np = (await run('new_project', { currency: 'USD', id: 'CH', start: '2026-03-02' })).out as any;
   const ops: unknown[] = [];
   for (let i = 0; i < n; i++) { ops.push({ op: 'add_activity', id: `L${i}`, name: `L${i}`, duration_days: 10 }); if (i) ops.push({ op: 'add_relationship', pred: `L${i - 1}`, succ: `L${i}` }); }
   ok(await run('edit', { handle: np.handle, owner_key: np.owner_key, operations: ops }));
@@ -130,7 +130,7 @@ test('Crashing: the panel’s settings are crash_schedule’s arguments (no step
 });
 
 test('Lint: the panel’s call simulates every critical ladder (the tool’s default); Cancel shows the checks finished and how many simulations were done', async () => {
-  const np = (await run('new_project', { id: 'LTS', start: '2026-03-02' })).out as any;
+  const np = (await run('new_project', { currency: 'USD', id: 'LTS', start: '2026-03-02' })).out as any;
   const ops: unknown[] = [{ op: 'add_activity', id: 'S', name: 'Start', type: 'start_milestone' }, { op: 'add_activity', id: 'H', name: 'Finish', type: 'finish_milestone' }];
   let prev = 'S';
   for (let k = 0; k < 160; k++) for (let n = 1; n <= 4; n++) { const id = `L${k}_${n}`; ops.push({ op: 'add_activity', id, name: `Zone ${String.fromCharCode(65 + (k % 26))}${String.fromCharCode(65 + Math.floor(k / 26))} pour ${n}`, duration_days: 5 }, { op: 'add_relationship', pred: prev, succ: id, type: 'FS' }); prev = id; }
@@ -148,7 +148,7 @@ test('Lint: the panel’s call simulates every critical ladder (the tool’s def
 });
 
 test('Float paths: the panel’s call is float_paths’ with between; "the longest N of TOTAL", and a loop or a missing activity is the tool’s error text', async () => {
-  const np = (await run('new_project', { id: 'FP', start: '2026-03-02' })).out as any;
+  const np = (await run('new_project', { currency: 'USD', id: 'FP', start: '2026-03-02' })).out as any;
   const ops: unknown[] = [{ op: 'add_activity', id: 'S', name: 'S', duration_days: 1 }];
   let prev = 'S';
   for (let i = 1; i <= 6; i++) ops.push({ op: 'add_activity', id: `a${i}`, name: 'a', duration_days: 1 }, { op: 'add_activity', id: `b${i}`, name: 'b', duration_days: 2 }, { op: 'add_activity', id: `J${i}`, name: 'J', duration_days: 1 }, { op: 'add_relationship', pred: prev, succ: `a${i}` }, { op: 'add_relationship', pred: prev, succ: `b${i}` }, { op: 'add_relationship', pred: `a${i}`, succ: `J${i}` }, { op: 'add_relationship', pred: `b${i}`, succ: `J${i}` }), prev = `J${i}`;
@@ -171,7 +171,7 @@ test('Float paths: the panel’s call is float_paths’ with between; "the longe
 });
 
 test('Optimize: the panel’s call is optimize_schedule’s; the table, "the first 25 of N", the windows and the notes are the tool’s answer, each shown only when there', { skip: !reasonerModelPath() && 'models/reasoner.onnx is not present' }, async () => {
-  const np = (await run('new_project', { id: 'OPT', start: '2026-06-01' })).out as any;
+  const np = (await run('new_project', { currency: 'USD', id: 'OPT', start: '2026-06-01' })).out as any;
   const ops: unknown[] = [{ op: 'add_resource', id: 'civil', name: 'Civil', max_units_per_hour: 4 }];
   for (const [id, d] of [['A', 4], ['B', 6], ['C', 5], ['D', 7], ['E', 3]] as const) ops.push({ op: 'add_activity', id, name: id, duration_days: d }, { op: 'assign_resource', activity: id, resource: 'civil', units_per_day: 16 });
   ops.push({ op: 'add_relationship', pred: 'A', succ: 'B' }, { op: 'add_relationship', pred: 'C', succ: 'D' });
@@ -242,7 +242,7 @@ test('the app’s child process: an Export (the request, then stdin ended, no pr
 });
 
 test('Monte Carlo: the Risks grid and the S-curve read from the tool’s answer every column and point the engine’s result gave, on a seeded run (the page looks as before)', async () => {
-  const np = (await run('new_project', { id: 'G', start: '2026-03-02' })).out as any;
+  const np = (await run('new_project', { currency: 'USD', id: 'G', start: '2026-03-02' })).out as any;
   ok(await run('edit', { handle: np.handle, owner_key: np.owner_key, operations: [
     { op: 'add_activity', id: 'A', name: 'A', duration_days: 10 }, { op: 'add_activity', id: 'B', name: 'B', duration_days: 5 }, { op: 'add_activity', id: 'S', name: 'Side', duration_days: 2 },
     { op: 'add_activity', id: 'M', name: 'Milestone', duration_days: 0, type: 'finish_milestone' },
@@ -295,7 +295,7 @@ const whiq = (d: Db) => {
 };
 
 test('Optimize: Apply works on any schedule (the answer has the whole placement order, 130 activities here) and the project it makes has the dates of the tool’s apply: true', { skip: !reasonerModelPath() && 'models/reasoner.onnx is not present' }, async () => {
-  const np = (await run('new_project', { id: 'OPA', start: '2026-06-01' })).out as any;
+  const np = (await run('new_project', { currency: 'USD', id: 'OPA', start: '2026-06-01' })).out as any;
   const ops: unknown[] = [{ op: 'add_resource', id: 'civil', name: 'Civil', max_units_per_hour: 12 }];
   for (let i = 0; i < 130; i++) ops.push({ op: 'add_activity', id: `T${i}`, name: `T${i}`, duration_days: 2 + (i % 5) }, { op: 'assign_resource', activity: `T${i}`, resource: 'civil', units_per_day: 16 });
   for (let i = 0; i < 130; i += 3) if (i + 3 < 130) ops.push({ op: 'add_relationship', pred: `T${i}`, succ: `T${i + 3}` });
@@ -386,7 +386,7 @@ const nameOf = (id: string) => rows(getDb(), 'PROJECT').find((p) => p.proj_id ==
 
 /** P (A 10 d, B 5 d, S 2 d, milestone M) with estimates, and copies of it, whose A is made longer: Activity IDs shared by the projects. */
 async function projects(copies: string[], resource = false) {
-  const np = (await run('new_project', { id: 'P', start: '2026-03-02' })).out as any;
+  const np = (await run('new_project', { currency: 'USD', id: 'P', start: '2026-03-02' })).out as any;
   const est = (project?: string) => [
     { op: 'set_estimates', ...(project ? { project } : {}), activity: 'A', min_days: 8, most_likely_days: 10, max_days: 20 }, { op: 'set_estimates', ...(project ? { project } : {}), activity: 'B', min_days: 4, most_likely_days: 5, max_days: 9 },
     { op: 'set_estimates', ...(project ? { project } : {}), activity: 'S', min_days: 1, most_likely_days: 2, max_days: 4 }];

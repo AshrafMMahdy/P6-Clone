@@ -14,7 +14,7 @@ const call = async (name: string, args: Record<string, unknown>) => {
 };
 
 test('a failed call on an open project says the earlier calls are kept and only it is redone', async () => {
-  const np = (await call('new_project', { id: 'KEEP', start: '2026-03-02' })).d;
+  const np = (await call('new_project', { currency: 'USD', id: 'KEEP', start: '2026-03-02' })).d;
   const h = np.handle, owner_key = np.owner_key;
   assert.equal((await call('edit', { handle: h, owner_key, operations: [{ op: 'add_activity', id: 'A1', name: 'Piling', duration_days: 5 }] })).err, false);
   const bad = await call('edit', { handle: h, owner_key, operations: [{ op: 'add_relationship', pred: 'A1', succ: 'NOPE' }] });
@@ -39,7 +39,7 @@ test('the save at exit writes the 4D links beside its .recovered XER', async () 
   const out = mkdtempSync(join(tmpdir(), 'p6-exit-4d-'));
   setRoots(FX, out);
   try {
-    const np = (await call('new_project', { id: 'EXIT4D', start: '2026-03-02' })).d;
+    const np = (await call('new_project', { currency: 'USD', id: 'EXIT4D', start: '2026-03-02' })).d;
     const h = np.handle, owner_key = np.owner_key;
     await call('edit', { handle: h, owner_key, operations: [{ op: 'add_activity', id: 'L1W', name: 'Level 1 walls', duration_days: 10 }] });
     const om = await call('open_model', { handle: h, owner_key, path: 'Duplex_A_20110907.ifc' });

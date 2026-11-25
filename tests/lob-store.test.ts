@@ -18,7 +18,7 @@ function model(floors = 3): LobModel {
 }
 function saved(m = model()): { db: Db; pid: string } {
   const db: Db = { tables: {} };
-  applyOps(db, [{ op: 'add_project', id: 'LOB', start: '2026-03-02' }, { op: 'add_project', id: 'DES', start: '2026-03-02' }]);
+  applyOps(db, [{ op: 'add_project', currency: 'USD', id: 'LOB', start: '2026-03-02' }, { op: 'add_project', currency: 'USD', id: 'DES', start: '2026-03-02' }]);
   const pid = rows(db, 'PROJECT').find((p) => p.proj_short_name === 'LOB')!.proj_id;
   expandLob(db, pid, m, { hoursPerDay: 8 });
   saveLobModel(db, pid, m, { hoursPerDay: 8 });

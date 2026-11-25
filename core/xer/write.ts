@@ -1,3 +1,4 @@
+import { baseCurrency } from '../currency.ts';
 import { KEYS, refTarget, type Db, type Row } from '../db.ts';
 import { encodeText, encodingLabel, keepOrChoose, type TextEncodingName } from '../encoding.ts';
 import { formatDay } from '../dates.ts';
@@ -141,12 +142,14 @@ export function writeXerTo(db: Db, opts: WriteOptions, put: (bytes: Uint8Array) 
   const sel = selectRows(db, opts.projIds);
   // A file that had an ERMHDR line keeps it as it was read, field for field and as many as it had (type, user, user's name, database, module, currency - whatever the CURRTYPE table
   // says); only the version and the export date are new, and what the caller names (user, user name, database, currency) replaces its place. A new project (no header) takes its
-  // currency from the base CURRTYPE row (the one P6 XML calls IsBaseCurrency, else the first), else USD.
+  // currency from the file's base currency (core/currency.ts); a file that names none is not written: P6 reads the costs in the currency the line
+  // names, and the clone never assumes one (set it with edit set_currency).
   const H = db.header?.raw && db.header.raw.length > 3 ? db.header.raw : null;
-  const baseCurr = db.tables.CURRTYPE?.rows.find((r) => r._xml_IsBaseCurrency === 'true') ?? db.tables.CURRTYPE?.rows[0];
+  const baseCurr = baseCurrency(db);
+  if (!H && opts.currency == null && !baseCurr) throw new Error('The file names no base currency, and an XER names the currency its costs are in: set it first with edit set_currency (an ISO 4217 code such as "EUR").');
   const day = opts.exportDate ?? formatDay(Date.now() / 60000);
   const headerLine = (): string => {
-    if (!H) return ['ERMHDR', opts.version, day, 'Project', opts.user ?? 'admin', opts.userName ?? 'admin', opts.dbName ?? 'dbxDatabaseNoName', 'Project Management', opts.currency ?? baseCurr?.curr_short_name ?? 'USD'].join('\t');
+    if (!H) return ['ERMHDR', opts.version, day, 'Project', opts.user ?? 'admin', opts.userName ?? 'admin', opts.dbName ?? 'dbxDatabaseNoName', 'Project Management', opts.currency ?? baseCurr!.curr_short_name].join('\t');
     const f = [...H];
     f[1] = opts.version; f[2] = day;
     const modern = f.length > 8 && f[3] === ''; // (P6 18+: more fields after the user; the currency is the last in both)

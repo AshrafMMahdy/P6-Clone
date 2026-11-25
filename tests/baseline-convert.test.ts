@@ -14,9 +14,9 @@ const call = async (name: string, args: Record<string, unknown>) => { const r = 
 const edit = async (h: string, ...operations: unknown[]) => call('edit', { handle: h, operations });
 /** P (A 5d -> B 5d) and Q (A 3d -> B 3d), with B of Q a predecessor of B of P: scheduled together P finishes 19 March, on its own 13 March. */
 async function two() {
-  const p = await call('new_project', { id: 'P', start: '2026-03-02' }), h = p.handle as string;
+  const p = await call('new_project', { currency: 'USD', id: 'P', start: '2026-03-02' }), h = p.handle as string;
   const e = await edit(h, { op: 'add_activity', id: 'A', name: 'a', duration_days: 5 }, { op: 'add_activity', id: 'B', name: 'b', duration_days: 5 }, { op: 'add_relationship', pred: 'A', succ: 'B' },
-    { op: 'add_project', id: 'Q', start: '2026-03-02' }, { op: 'add_activity', project: 'Q', id: 'A', name: 'a', duration_days: 3 }, { op: 'add_activity', project: 'Q', id: 'B', name: 'b', duration_days: 6 }, { op: 'add_relationship', project: 'Q', pred: 'A', succ: 'B' },
+    { op: 'add_project', currency: 'USD', id: 'Q', start: '2026-03-02' }, { op: 'add_activity', project: 'Q', id: 'A', name: 'a', duration_days: 3 }, { op: 'add_activity', project: 'Q', id: 'B', name: 'b', duration_days: 6 }, { op: 'add_relationship', project: 'Q', pred: 'A', succ: 'B' },
     { op: 'add_relationship', pred: 'B', pred_project: 'Q', succ: 'B', succ_project: 'P' });
   assert.ok(!e.error, JSON.stringify(e.error));
   return { h, owner_key: p.owner_key as string };
@@ -89,9 +89,9 @@ test('an assigned baseline is neither restored nor deleted, as in P6; cleared an
 
 /** P (A -> B, and X), Q (A -> B), with B of P -> A of Q and B of Q -> X of P: through Q, and only through Q, B of P leads to X of P. */
 async function withLinks() {
-  const p = await call('new_project', { id: 'P', start: '2026-03-02' }), h = p.handle as string;
+  const p = await call('new_project', { currency: 'USD', id: 'P', start: '2026-03-02' }), h = p.handle as string;
   const act = (id: string, project?: string) => ({ op: 'add_activity', id, name: id, duration_days: 3, ...(project ? { project } : {}) });
-  const e = await edit(h, act('A'), act('B'), act('X'), { op: 'add_relationship', pred: 'A', succ: 'B' }, { op: 'add_project', id: 'Q', start: '2026-03-02' }, act('A', 'Q'), act('B', 'Q'),
+  const e = await edit(h, act('A'), act('B'), act('X'), { op: 'add_relationship', pred: 'A', succ: 'B' }, { op: 'add_project', currency: 'USD', id: 'Q', start: '2026-03-02' }, act('A', 'Q'), act('B', 'Q'),
     { op: 'add_relationship', project: 'Q', pred: 'A', succ: 'B' }, { op: 'add_relationship', pred: 'B', pred_project: 'P', succ: 'A', succ_project: 'Q' }, { op: 'add_relationship', pred: 'B', pred_project: 'Q', succ: 'X', succ_project: 'P' });
   assert.ok(!e.error, JSON.stringify(e.error));
   return { h, owner_key: p.owner_key as string };
@@ -122,7 +122,7 @@ test('a baseline\'s links are no logic for the edit either: they close no loop, 
   const del = await edit(h, { op: 'delete_relationship', pred: 'B', pred_project: 'Q', succ: 'X', succ_project: 'P' });
   assert.deepEqual(del.changes, [{ id: 'B in baseline Q FS X in P', field: 'baseline link', old: 'exists', new: 'deleted' }]);
   // a Project ID a baseline holds is taken
-  assert.equal((await edit(h, { op: 'add_project', id: 'Q', start: '2026-03-02' })).error.message, 'A project or baseline "Q" already exists.');
+  assert.equal((await edit(h, { op: 'add_project', currency: 'USD', id: 'Q', start: '2026-03-02' })).error.message, 'A project or baseline "Q" already exists.');
   assert.equal((await edit(h, { op: 'convert_to_baseline', project: 'Q', of: 'P' })).error.message, 'Q is a baseline, not a project: only a project is converted (restore_baseline turns a baseline back into a project first).');
 });
 
@@ -144,7 +144,7 @@ test('a baseline\'s link leaves the file only whole: one project saved as P6 XML
   // the whole file as XER, then P alone imported into a new project: no relationship of the import points at itself or at an activity it did not bring
   const xer = join(dir, `links-${stamp}.xer`);
   assert.ok(!(await call('save', { handle: h, owner_key, path: xer })).error);
-  const t = await call('new_project', { id: 'T', start: '2026-03-02' });
+  const t = await call('new_project', { currency: 'USD', id: 'T', start: '2026-03-02' });
   await edit(t.handle, ...['T1', 'T2', 'T3', 'T4', 'T5', 'T6'].map((id) => ({ op: 'add_activity', id, name: id, duration_days: 1 })));
   const imp = await call('import_file', { handle: t.handle, path: xer, from_project: 'P', action: 'new' });
   assert.ok(!imp.error, JSON.stringify(imp.error));
@@ -157,7 +157,7 @@ test('a relationship kept to an activity outside the file stays that: an activit
   const dir = process.env.TMPDIR ?? '/tmp', xer = join(dir, `outside-${Date.now()}.xer`);
   assert.ok(!(await call('save', { handle: h, owner_key, path: xer })).error);
   // P alone into an empty file: its relationship from Q's B is kept, to an activity outside the file
-  const t = await call('new_project', { id: 'T', start: '2026-03-02' });
+  const t = await call('new_project', { currency: 'USD', id: 'T', start: '2026-03-02' });
   const imp = await call('import_file', { handle: t.handle, path: xer, from_project: 'P', action: 'new' });
   assert.ok(!imp.error, JSON.stringify(imp.error));
   const outside = () => { const db = getSession(t.handle).db, ids = new Set(db.tables.TASK.rows.map((x) => x.task_id)); return db.tables.TASKPRED.rows.filter((r) => !ids.has(r.pred_task_id) || !ids.has(r.task_id)).length; };
@@ -169,7 +169,7 @@ test('a relationship kept to an activity outside the file stays that: an activit
   assert.ok(!(await edit(w.h, { op: 'save_baseline', project: 'P', name: 'PB' })).error);
   const xer2 = join(dir, `outside2-${Date.now()}.xer`);
   assert.ok(!(await call('save', { handle: w.h, owner_key: w.owner_key, path: xer2 })).error);
-  const u = await call('new_project', { id: 'U', start: '2026-03-02' });
+  const u = await call('new_project', { currency: 'USD', id: 'U', start: '2026-03-02' });
   await edit(u.handle, ...['U1', 'U2', 'U3', 'U4', 'U5', 'U6'].map((id) => ({ op: 'add_activity', id, name: id, duration_days: 1 })));
   const imp2 = await call('import_file', { handle: u.handle, path: xer2, from_project: 'P', action: 'new' });
   assert.ok(!imp2.error, JSON.stringify(imp2.error));

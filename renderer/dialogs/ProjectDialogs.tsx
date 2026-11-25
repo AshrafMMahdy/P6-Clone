@@ -1,3 +1,4 @@
+import { baseCurrency, currencyRow } from '../../core/currency.ts';
 import { useState } from 'react';
 import { Dialog, Tabs } from '../components/Layout.tsx';
 import { closeDialog, getDb, mutate, openDialog, setUi, toast, useStore } from '../store.ts';
@@ -19,11 +20,15 @@ export function NewProjectDialog() {
   const [name, setName] = useState('New Project');
   const [start, setStart] = useState(new Date().toISOString().slice(0, 10) + 'T08:00');
   const [epsId, setEps] = useState(eps[0]?.eps_id ?? '1');
+  // a file with no base currency yet asks for it, as P6 asks when its database is set up (every project of the file keeps its costs in it)
+  const askCurrency = !baseCurrency(db);
+  const [currency, setCurrency] = useState('');
   const create = () => {
     if (!id.trim()) return toast('Project ID is required.');
     if (rows(db, 'PROJECT').some((p) => p.proj_short_name === id.trim())) return toast(`Project ID ${id} already exists.`);
+    if (askCurrency) { if (!currency.trim()) return toast('Base Currency is required: the ISO code of the currency costs are kept in (EUR, GBP, SAR …).'); try { currencyRow(currency.trim()); } catch (e) { return toast((e as Error).message); } }
     let pid = '';
-    mutate('New Project', (d) => { pid = newProject(d, { id: id.trim(), name, start: fromDt(start), epsId }); });
+    mutate('New Project', (d) => { pid = newProject(d, { id: id.trim(), name, start: fromDt(start), epsId, ...(askCurrency ? { currency: currency.trim() } : {}) }); });
     closeDialog();
     openProjects([pid]);
   };
@@ -34,6 +39,7 @@ export function NewProjectDialog() {
         <label>Project ID</label><input value={id} onChange={(e) => setId(e.target.value)} />
         <label>Project Name</label><input value={name} onChange={(e) => setName(e.target.value)} />
         <label>Planned Start</label><input type="datetime-local" value={start} onChange={(e) => setStart(e.target.value)} />
+        {askCurrency && <><label>Base Currency</label><input value={currency} placeholder="ISO code (EUR, GBP, SAR …)" onChange={(e) => setCurrency(e.target.value)} /></>}
       </div>
     </Dialog>
   );

@@ -19,7 +19,7 @@ setRoots(null, tmpdir());
 const call = async (name: string, args: Record<string, unknown>, progress?: (d: number, t: number, m: string) => void) => { const r = await callTool(name, args, undefined, undefined, progress); return toolResult(r.out, r.isError).structuredContent as any; };
 afterEach(async () => { for (const h of (await call('list_open', {})).open) await call('close', { handle: h.handle, discard: true }); });
 const dir = mkdtempSync(join(tmpdir(), 'p6a5b-'));
-const two = (): Db => { const db: Db = { tables: {} }; assert.equal(applyOps(db, [{ op: 'add_project', id: 'P', start: '2026-03-02' }, { op: 'add_activity', id: 'A', name: 'A', duration_days: 5 }, { op: 'add_activity', id: 'B', name: 'B', duration_days: 5 }, { op: 'add_relationship', pred: 'A', succ: 'B' }]).ok, true); return db; };
+const two = (): Db => { const db: Db = { tables: {} }; assert.equal(applyOps(db, [{ op: 'add_project', currency: 'USD', id: 'P', start: '2026-03-02' }, { op: 'add_activity', id: 'A', name: 'A', duration_days: 5 }, { op: 'add_activity', id: 'B', name: 'B', duration_days: 5 }, { op: 'add_relationship', pred: 'A', succ: 'B' }]).ok, true); return db; };
 const bare = (ops: Record<string, unknown>[]) => ops.map(({ project: _p, ...o }) => o);
 const id = (db: Db, c: string) => rows(db, 'TASK').find((t) => t.task_code === c)!.task_id;
 
@@ -59,7 +59,7 @@ test('Microsoft Project files keep one relationship per pair, by the same rule i
 });
 
 test('G-6 monte_carlo: inline events (activity and project-level delay), ratio samplers, re_anchor, deadline, working days with sigma marks, progress', async () => {
-  const h = (await call('new_project', { id: 'MC', start: '2026-03-02' })).handle;
+  const h = (await call('new_project', { currency: 'USD', id: 'MC', start: '2026-03-02' })).handle;
   await call('edit', { handle: h, operations: [{ op: 'add_activity', id: 'A', name: 'A', duration_days: 10 }, { op: 'add_activity', id: 'B', name: 'B', duration_days: 10 }, { op: 'add_relationship', pred: 'A', succ: 'B' }] });
   await call('schedule', { handle: h });
   const mc = (args: Record<string, unknown>, progress?: (d: number, t: number, m: string) => void) => call('monte_carlo', { handle: h, iterations: 200, seed: 7, ...args }, progress);
@@ -94,7 +94,7 @@ test('G-6 monte_carlo: inline events (activity and project-level delay), ratio s
 });
 
 test('G-6 monte_carlo stops at a cancellation and keeps the iterations done (4L-13: a partial answer, not an error)', async () => {
-  const h = (await call('new_project', { id: 'MX', start: '2026-03-02' })).handle;
+  const h = (await call('new_project', { currency: 'USD', id: 'MX', start: '2026-03-02' })).handle;
   await call('edit', { handle: h, operations: [{ op: 'add_activity', id: 'A', name: 'A', duration_days: 10 }, { op: 'set_estimates', activity: 'A', min_days: 8, max_days: 14 }] });
   const abort = new AbortController();
   const p = callTool('monte_carlo', { handle: h, iterations: 20000, seed: 1 }, undefined, abort.signal, (done) => { if (done > 50) abort.abort(); });
@@ -106,7 +106,7 @@ test('G-6 monte_carlo stops at a cancellation and keeps the iterations done (4L-
 });
 
 async function crew() {
-  const h = (await call('new_project', { id: 'LV', start: '2026-03-02' })).handle;
+  const h = (await call('new_project', { currency: 'USD', id: 'LV', start: '2026-03-02' })).handle;
   await call('edit', { handle: h, operations: [
     ...['A', 'B', 'C', 'D'].map((x) => ({ op: 'add_activity', id: x, name: x, duration_days: x === 'D' ? 3 : 5 })),
     { op: 'add_relationship', pred: 'A', succ: 'B' }, { op: 'add_relationship', pred: 'B', succ: 'C' }, { op: 'add_relationship', pred: 'A', succ: 'D' },

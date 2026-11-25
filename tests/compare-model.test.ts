@@ -13,7 +13,7 @@ const call = async (name: string, args: Record<string, unknown>) => {
 };
 
 test('compare {model}: what changed between the attached model and a revision â€” removed, renamed, the rest unchanged; filters, pages, files', async () => {
-  const np = (await call('new_project', { id: 'CM', start: '2026-03-02' })).d;
+  const np = (await call('new_project', { currency: 'USD', id: 'CM', start: '2026-03-02' })).d;
   const h = np.handle, owner_key = np.owner_key;
   const none = await call('compare', { handle: h, model: join(FX, 'Duplex_A_20110907.ifc'), export: join(tmpdir(), 'p6-cm-none') });
   assert.equal(none.err, true);
@@ -97,7 +97,7 @@ test('compare {model}: what changed between the attached model and a revision â€
   assert.equal((await call('list_elements', { handle: h, class: 'IfcWall', limit: 3 })).d.elements[0].guid, gone.guid);
 
   // what filters a model comparison, sent with a comparison of schedules: said as not used
-  const other = (await call('new_project', { id: 'CM2', start: '2026-03-02' })).d;
+  const other = (await call('new_project', { currency: 'USD', id: 'CM2', start: '2026-03-02' })).d;
   const sched = await call('compare', { handle: h, other_handle: other.handle, kind: 'removed', export: join(out, 'sched') });
   assert.equal(sched.err, false, JSON.stringify(sched.d).slice(0, 300));
   assert.ok((sched.d.notes ?? []).some((x: string) => /kind belongs to a comparison of models \(model\): not used/.test(x)), JSON.stringify(sched.d.notes));

@@ -16,7 +16,7 @@ const call = async (name: string, args: Record<string, unknown>) => {
 };
 const ACTS = [['L1W', 'Level 1 walls', 'Level 1', 'IfcWall'], ['L2S', 'Level 2 slab', 'Level 2', 'IfcSlab'], ['L2W', 'Level 2 walls', 'Level 2', 'IfcWall']] as const;
 async function linked(id: string, model = join(FX, 'Duplex_A_20110907.ifc'), link = true) {
-  const np = (await call('new_project', { id, start: '2026-03-02' })).d;
+  const np = (await call('new_project', { currency: 'USD', id, start: '2026-03-02' })).d;
   const h = np.handle, owner_key = np.owner_key;
   await call('edit', { handle: h, owner_key, operations: ACTS.map(([a, n]) => ({ op: 'add_activity', id: a, name: n, duration_days: 5 })) });
   await call('schedule', { handle: h, owner_key });
@@ -44,7 +44,7 @@ test('import_4d reads each format the clone exports: search sets, TimeLiner CSV,
   assert.equal(t.d.matched_activities, ACTS.length, 'every TimeLiner task matched its activity');
   assert.equal(t.d.activities_with_links, ACTS.length, 'attached sets link through the imported sets');
   // IFC4 4D needs an IFC4 model
-  const np = (await call('new_project', { id: 'IMP4', start: '2026-03-02' })).d;
+  const np = (await call('new_project', { currency: 'USD', id: 'IMP4', start: '2026-03-02' })).d;
   await call('edit', { handle: np.handle, owner_key: np.owner_key, operations: ['Slab #1', 'Wall #1'].map((n) => ({ op: 'add_activity', id: n.replace(/\W/g, ''), name: n, duration_days: 2 })) });
   await call('schedule', { handle: np.handle, owner_key: np.owner_key });
   await call('open_model', { handle: np.handle, owner_key: np.owner_key, path: join(FX, 'construction-scheduling-task.ifc'), geometry: false });
@@ -92,7 +92,7 @@ test('open_model: a file named .rvt / .nwd / .sp whose bytes are not that format
 });
 
 test('render_4d: a P6CLONE_CHROMIUM that is not Chromium fails the call with render_failed; the server lives on', { timeout: 120_000 }, async () => {
-  const np = (await call('new_project', { id: 'RF', start: '2026-03-02' })).d;
+  const np = (await call('new_project', { currency: 'USD', id: 'RF', start: '2026-03-02' })).d;
   const h = np.handle, owner_key = np.owner_key;
   await call('edit', { handle: h, owner_key, operations: [{ op: 'add_activity', id: 'W', name: 'Wall #1', duration_days: 2 }] });
   await call('schedule', { handle: h, owner_key });
