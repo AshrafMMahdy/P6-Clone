@@ -38,6 +38,7 @@ test('a file that states the wrong unit, read by the caller’s: the sizes, the 
   const plain = await call('open_model', { handle: h, owner_key, path: ifc });
   assert.equal(plain.err, false, JSON.stringify(plain.d).slice(0, 400));
   assert.equal(plain.d.length_unit, 'm (the file’s own)');
+  assert.equal(plain.d.unit_note, undefined, 'a unit the file states: no note (only the agent’s measuring finds a wrong one)');
   const guid = (await call('list_elements', { handle: h })).d.elements[0].guid;
   assert.deepEqual(size((await call('element_info', { handle: h, guids: [guid] })).d.elements[0].bbox), [1000, 2000, 3000]);
   // the caller measured the door: millimetres
@@ -99,10 +100,19 @@ test('a file that states no unit (no unit assignment, or one without a length): 
   for (const { path, unit, plain, text, units } of cases) {
     const np = (await call('new_project', { id: 'NU', start: '2027-01-04' })).d, h = np.handle, owner_key = np.owner_key;
     await call('edit', { handle: h, owner_key, operations: [{ op: 'add_activity', id: 'D1', name: 'Doors', duration_days: 5 }] });
-    assert.equal((await call('open_model', { handle: h, owner_key, path })).d.length_unit, plain, path);
+    const p0 = (await call('open_model', { handle: h, owner_key, path })).d;
+    assert.equal(p0.length_unit, plain, path);
+    // while the unit is taken as metres, every answer that gives sizes tells the agent to measure (or to say they are assumed)
+    const steer = /measure an element whose real size you know .*open_model again with length_unit/;
+    const g0 = (await call('list_elements', { handle: h })).d.elements[0].guid;
+    assert.match(p0.unit_note, steer, path);
+    assert.match((await call('element_info', { handle: h, guids: [g0] })).d.unit_note, steer);
+    assert.match((await call('quantities', { handle: h, kind: 'length' })).d.unit_note, steer);
     const r = await call('open_model', { handle: h, owner_key, path, length_unit: unit });
     assert.equal(r.d.length_unit, text);
+    assert.equal(r.d.unit_note, undefined, 'the caller gave the unit');
     const guid = (await call('list_elements', { handle: h })).d.elements[0].guid;
+    assert.equal((await call('element_info', { handle: h, guids: [guid] })).d.unit_note, undefined);
     assert.deepEqual(size((await call('element_info', { handle: h, guids: [guid] })).d.elements[0].bbox), unit === 'cm' ? [10, 20, 30] : [1, 2, 3]);
     const q = (await call('quantities', { handle: h, kind: 'length' })).d.units;
     // the caller's unit is the length's: areas and volumes stay what the file assigns, or IFC's SI unit
@@ -135,6 +145,10 @@ test('a Navisworks model read by the caller’s unit: its geometry placed by it 
   assert.equal(b.err, false, JSON.stringify(b.d).slice(0, 400));
   assert.match(a.d.length_unit, /^m \(made from each file’s: /);
   assert.match(b.d.length_unit, /^mm \(given by the caller; the file states /);
+  // a file that names no unit (not a Revit export): its metres are assumed, and the answer says to measure
+  const assumed = a.d.source.files.some((f: { unitAssumed?: boolean }) => f.unitAssumed);
+  assert.equal(!!a.d.unit_note, assumed);
+  assert.equal(b.d.unit_note, undefined);
   const guids = (await call('list_elements', { handle: a.d.handle })).d.elements.map((e: { guid: string }) => e.guid);
   const ea = (await call('element_info', { handle: a.d.handle, guids })).d.elements.find((e: { bbox?: number[] }) => e.bbox);
   const eb = (await call('element_info', { handle: b.d.handle, guids: [ea.guid] })).d.elements[0];

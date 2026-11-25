@@ -67,7 +67,7 @@ export async function runJob(job: NwJob, progress?: Progress): Promise<Naviswork
         // the reader placed the geometry by the caller's unit (readNative scale): what the files state is kept to be said
         Object.assign(index, { lengthScale: LENGTH_UNITS[job.lengthUnit], lengthScaleSource: 'caller', lengthUnit: job.lengthUnit, meshScale: 1,
           statedLength: [...new Set(r.files.filter((f) => f.read).map((f) => f.units ?? 'none'))].join('; ') });
-      }
+      } else if (r.files.some((f) => f.read && f.unitAssumed)) index.lengthScaleSource = 'assumed-m'; // (a model that names no unit: its metres are assumed)
       if (r.geometry) {
         progress?.(job.parts.length, job.parts.length + 1, 'making the display tiles');
         step('making the display tiles (the tiler\u2019s own steps follow)');

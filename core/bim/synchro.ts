@@ -339,7 +339,7 @@ export function readSynchro(bytes: Uint8Array): SynchroFile {
   const v = level(box.version, box.schema);
   const unit = worldUnit(box.tables.get('3DWorldSettings'), v);
   const out: SynchroFile = { version: box.version, tasks: [], predecessors: [], resources: [], assignments: [], paths: [], scale: unit.scale, units: unit.units, notes };
-  if (unit.units === 'assumed-m') out.unitNote = (`${unit.setting === null ? 'The file\'s 3D world settings (its unit) could not be read' : `The file's 3D unit is setting ${unit.setting}, which no SYNCHRO file read so far has used (1 is millimetres, 3 metres)`}: its 3D numbers are taken as metres (assumed), so say so on any size, quantity or place read from it.`);
+  if (unit.units === 'assumed-m') out.unitNote = (`${unit.setting === null ? 'The file\'s 3D world settings (its unit) could not be read' : `The file's 3D unit is setting ${unit.setting}, which no SYNCHRO file read so far has used (1 is millimetres, 3 metres)`}: its 3D numbers are taken as metres (assumed).`);
   const cur = (name: string): Cur | null => { const b = box.tables.get(name); if (!b) notes.push(`No ${name} table.`); return b ? { b, p: 0, v, bad: 0 } : null; };
   let bad = 0;
 

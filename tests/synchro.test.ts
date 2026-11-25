@@ -266,20 +266,24 @@ test('length_unit on a SYNCHRO project: its objects and its paths placed by the 
   assert.equal(a.err, false, JSON.stringify(a.d).slice(0, 400));
   assert.equal(a.d.length_unit, 'm (assumed: the file states no unit the reader knows)');
   assert.match(a.d.source.unit_note, /setting 2/);
+  assert.match(a.d.unit_note, /measure an element whose real size you know/, 'told to measure');
   const ia = await call('import_4d', { handle: h, owner_key, path: unit2, link: false });
   assert.deepEqual(lift(ia), [-1818.561, 60624.957, 4996.766]);
   assert.ok(assumed(ia));
+  assert.match(ia.d.unit_note, /measure an element whose real size you know/, 'the paths too');
   // the caller measured a column (610 x 610 mm): millimetres
   const b = await call('open_model', { handle: h, owner_key, path: unit2, length_unit: 'mm' });
   assert.equal(b.err, false, JSON.stringify(b.d).slice(0, 400));
   assert.equal(b.d.length_unit, 'mm (given by the caller; the file states no unit the reader knows)');
   assert.equal(b.d.source.unit_note, undefined);
+  assert.equal(b.d.unit_note, undefined);
   const col = (await call('list_elements', { handle: h, where: [{ property: 'name', value: '610 x 610mm' }], limit: 1 })).d.elements[0];
   const bb = (await call('element_info', { handle: h, guids: [col.guid] })).d.elements[0].bbox;
   assert.deepEqual([bb[3] - bb[0], bb[5] - bb[2]].map((x: number) => Math.round(x * 1000) / 1000), [0.61, 0.61]);
   const ib = await call('import_4d', { handle: h, owner_key, path: unit2, link: false });
   assert.deepEqual(lift(ib), [-1.819, 60.625, 4.997], 'the paths placed by the caller’s unit, as the model is');
   assert.ok(!assumed(ib));
+  assert.equal(ib.d.unit_note, undefined);
   // the file's own unit (millimetres) replaced: metres
   const c = await call('open_model', { handle: h, owner_key, path: paths3d, length_unit: 'm', geometry: false });
   assert.equal(c.d.length_unit, 'm (given by the caller; the file states mm)');

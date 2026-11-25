@@ -25,7 +25,7 @@ import { nwdWorkerPath } from './runtime.ts';
 /** The reader's format: any change to what it reads bumps it, so older caches and IFCs are not reused (2: the Revit
  *  data in LcOaPartitionProps; 3: placed boxes; 4-5: meshes; 6: classes 0x4f, 0x10, 0x20; 7: files in files, lights,
  *  binary assets, DWG materials, older meshes; 8: read as it is, no IFC in between; element k is #(k + 1)) */
-export const NWD_FORMAT = 8;
+export const NWD_FORMAT = 9;
 const HEAD = '#LcUStream';
 
 export function isNavisworks(path: string): boolean {
@@ -35,7 +35,7 @@ export function isNavisworks(path: string): boolean {
 }
 
 export interface NavisworksSource {
-  format: 'Navisworks'; files: { file: string; revision: number | null; elements: number; read: boolean; units?: string; note?: string }[];
+  format: 'Navisworks'; files: { file: string; revision: number | null; elements: number; read: boolean; units?: string; unitAssumed?: true; note?: string }[];
   elements: number; with_revit_ids: number; with_revit_guids: number;
   geometry: { elements_with_meshes: number; elements_with_boxes: number; note: string }; warnings: string[];
   /** the most memory the reading process took (MB), when it ran in a process of its own */

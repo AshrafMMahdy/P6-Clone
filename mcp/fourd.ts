@@ -96,6 +96,11 @@ type ReadOptions = { geometry?: boolean; tick?: AnalysisHelpers['tick']; opening
 const unitArg = (v: unknown): LengthUnit | undefined => (v == null || v === '' ? undefined : isLengthUnit(v) ? v
   : fail('bad_input', `length_unit "${String(v)}" is not a unit this reads.`, `Give one of ${Object.keys(LENGTH_UNITS).join(', ')} (the unit you measured the model\u2019s numbers in), or leave it out for the file\u2019s own.`));
 
+/** Said with every answer that gives sizes while the model's lengths are taken as metres (its file states no unit the reader can read):
+ *  the agent measures before it uses them, or says they are assumed. */
+const UNIT_STEER = 'The model\u2019s lengths are taken as metres: its file states no unit the reader can read. Before you give any size, quantity or place from it, measure an element whose real size you know (a door, a column, a wall\u2019s height: element_info\u2019s bbox, in metres); if it is wrong, open_model again with length_unit (mm, cm, m, in or ft) and say which element you measured. If nothing in it has a size you know, say that its sizes are taken as metres.';
+const unitNote = (m: Model) => (m.index.lengthScaleSource === 'assumed-m' ? { unit_note: UNIT_STEER } : {});
+
 /** The model's length unit in words: where it came from, and (a caller's) what the file states itself. */
 function lengthUnitWords(m: Model): string {
   const ix = m.index, src = m.source as { format?: string; units?: string; files?: { units?: string; read: boolean }[] } | undefined;
@@ -353,7 +358,7 @@ export async function runFourD(name: string, a: Record<string, any>, s: Session,
         return { dropped_links: before - T.rows.length };
       });
       // (a SYNCHRO file's assumed unit is not said when the caller gave the unit)
-      return { model: basename(path), ...(m.source ? { source: lengthUnit ? { ...m.source, unit_note: undefined } : m.source } : {}), schema: ix.schema, elements: ix.elements.length, storeys: ix.storeys, classes: ix.classCounts, length_unit: lengthUnitWords(m), geometry: ix.geometryStatus, meshed_elements: ix.meshedElements ?? 0, geometry_failures: ix.geometryFailures, ...(ix.geometryNote ? { geometry_note: ix.geometryNote } : {}), ...(ix.geometryStuck ? { geometry_stuck: ix.geometryStuck } : {}), ...((() => { const k = ix.geometryStatus === 'ok' ? null : keptMeshing(m.hash, path, true, lengthUnit); return k ? { ...k.data, kept_note: `${k.kept}. ${k.next}` } : {}; })()), ...((() => { let n = 0; for (const e of ix.elements) if (e.geom && e.derivedVolumeM3 == null) n++; return n ? { meshed_without_volume: n, volume_note: 'open meshes (a surface, a fitting open at its ends) and stand-in bounding boxes enclose no volume to measure, so they give no derived volume; their authored quantities stand' } : {}; })()), quantified_elements: ix.quantifiedElements, ...(m.tiles ? { display: (() => { const t = manifestOf(m.tiles!); return { tiles: t.tiles.length, mb: Math.round(t.bytes / 1048576), triangles: t.triangles, instances: t.instances }; })() } : {}), header: ix.header, ...kept };
+      return { model: basename(path), ...(m.source ? { source: lengthUnit ? { ...m.source, unit_note: undefined } : m.source } : {}), schema: ix.schema, elements: ix.elements.length, storeys: ix.storeys, classes: ix.classCounts, length_unit: lengthUnitWords(m), ...unitNote(m), geometry: ix.geometryStatus, meshed_elements: ix.meshedElements ?? 0, geometry_failures: ix.geometryFailures, ...(ix.geometryNote ? { geometry_note: ix.geometryNote } : {}), ...(ix.geometryStuck ? { geometry_stuck: ix.geometryStuck } : {}), ...((() => { const k = ix.geometryStatus === 'ok' ? null : keptMeshing(m.hash, path, true, lengthUnit); return k ? { ...k.data, kept_note: `${k.kept}. ${k.next}` } : {}; })()), ...((() => { let n = 0; for (const e of ix.elements) if (e.geom && e.derivedVolumeM3 == null) n++; return n ? { meshed_without_volume: n, volume_note: 'open meshes (a surface, a fitting open at its ends) and stand-in bounding boxes enclose no volume to measure, so they give no derived volume; their authored quantities stand' } : {}; })()), quantified_elements: ix.quantifiedElements, ...(m.tiles ? { display: (() => { const t = manifestOf(m.tiles!); return { tiles: t.tiles.length, mb: Math.round(t.bytes / 1048576), triangles: t.triangles, instances: t.instances }; })() } : {}), header: ix.header, ...kept };
     }
     case 'list_elements': {
       const m = (await modelOf(s.db, projId))!;
@@ -371,7 +376,7 @@ export async function runFourD(name: string, a: Record<string, any>, s: Session,
       const guids = (Array.isArray(a.guids) ? a.guids : []).map(String);
       const { byGuid } = linkMaps(s.db, projId);
       const code = new Map(rows(s.db, 'TASK').map((t) => [t.task_id, t.task_code]));
-      return { elements: guids.map((g) => { const e = m.byGuid.get(g); return e ? { ...plainElement(e), activities: (byGuid.get(g) ?? []).map((l) => ({ activity: code.get(l.task_id), role: l.role })) } : { guid: g, error: 'not in the model' }; }) };
+      return { ...unitNote(m), elements: guids.map((g) => { const e = m.byGuid.get(g); return e ? { ...plainElement(e), activities: (byGuid.get(g) ?? []).map((l) => ({ activity: code.get(l.task_id), role: l.role })) } : { guid: g, error: 'not in the model' }; }) };
     }
     case 'quantities': {
       const m = (await modelOf(s.db, projId, true, { geometry: true }))!;
@@ -419,7 +424,7 @@ export async function runFourD(name: string, a: Record<string, any>, s: Session,
       // derived volumes come from the geometry: without it they are absent (null), said so, never a silent zero
       const noGeom = m.index.geometryStatus !== 'ok';
       return {
-        group_by: by, geometry: m.index.geometryStatus, kind, units,
+        group_by: by, geometry: m.index.geometryStatus, kind, units, ...unitNote(m),
         ...(noGeom ? { derived_volume: `unavailable: ${m.index.geometryStatus === 'skipped' ? 'the model was opened with geometry: false (open_model again with geometry for volumes from the shapes)' : `the model's geometry did not build (${m.index.geometryNote ?? 'no reason given'})`}; volume_m3 is null and the authored quantities stand alone` } : {}),
         groups: [...groups].sort((x, y) => y[1].count - x[1].count).map(([k, g]) => ({
           group: k, count: g.count, volume_m3: noGeom ? null : r2(g.volume_m3), authored: Object.fromEntries(Object.entries(g.authored).map(([q, v]) => [q, r2(v)])),
@@ -894,7 +899,7 @@ export async function runFourD(name: string, a: Record<string, any>, s: Session,
       const tasksOnly = imp.source === 'timeliner_csv' || imp.source === 'nwf' || imp.source === 'nwd';
       const m = await modelOf(s.db, projId, !tasksOnly);
       const plan = planImport4d(s.db, projId, imp, m?.index ?? null, { createActivities: a.create_activities === true });
-      const summary = { source: imp.source, tasks: imp.tasks.length, matched_activities: plan.matched.size, activities_with_links: new Set(plan.proposals.map((p) => p.activity)).size, unmatched_tasks: plan.unmatchedTasks.slice(0, 100), proposed_links: plan.proposals.reduce((n, p) => n + p.guids.length, 0), ...(plan.elementsNotInModel ? { elements_not_in_model: plan.elementsNotInModel } : {}), ...(plan.sets.length ? { sets: plan.sets.map((x) => ({ name: x.name, elements: x.guids.length })) } : {}), ...(tasksOnly ? { attached_sets: plan.attachedSets } : {}), notes: plan.notes, ...(plan.paths?.length ? { paths: plan.paths } : {}) };
+      const summary = { source: imp.source, tasks: imp.tasks.length, matched_activities: plan.matched.size, activities_with_links: new Set(plan.proposals.map((p) => p.activity)).size, unmatched_tasks: plan.unmatchedTasks.slice(0, 100), proposed_links: plan.proposals.reduce((n, p) => n + p.guids.length, 0), ...(plan.elementsNotInModel ? { elements_not_in_model: plan.elementsNotInModel } : {}), ...(plan.sets.length ? { sets: plan.sets.map((x) => ({ name: x.name, elements: x.guids.length })) } : {}), ...(tasksOnly ? { attached_sets: plan.attachedSets } : {}), notes: plan.notes, ...(plan.paths?.length ? { paths: plan.paths, ...(m && imp.links.some((l) => (l.guids ?? []).some((g) => m.byGuid.has(g))) ? unitNote(m) : {}) } : {}) };
       // a dry run is also the review of the other tool's schedule: its tasks as that tool holds them
       const setSize = new Map(plan.sets.map((x) => [x.name, x.guids.length]));
       const taskList = imp.tasks.map((t) => ({ name: t.name, ...(t.id !== t.name ? { id: t.id } : {}), start: t.start ?? null, finish: t.finish ?? null, ...(t.actualStart || t.actualFinish ? { actual_start: t.actualStart ?? null, actual_finish: t.actualFinish ?? null } : {}), ...(t.type ? { type: t.type } : {}), ...(t.attached ? { attached: t.attached, elements: setSize.get(t.attached) ?? null } : {}) }));

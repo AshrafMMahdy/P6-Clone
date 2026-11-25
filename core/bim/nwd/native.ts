@@ -44,7 +44,8 @@ export function modelIn(c: NwContainer, file: string, max: number): { elements: 
 }
 
 export interface NativePart { file: string; at: string | null; note?: string }
-export interface NativeFile { file: string; revision: number | null; elements: number; read: boolean; units?: string; note?: string }
+/** unitAssumed: the file names no unit, so its geometry is taken as metres (a Revit export's is Revit's feet) */
+export interface NativeFile { file: string; revision: number | null; elements: number; read: boolean; units?: string; unitAssumed?: true; note?: string }
 export interface NativeRead {
   files: NativeFile[];
   /** elements read, in all */
@@ -90,7 +91,7 @@ export function readNative(parts: NativePart[], o: { dir?: string; maxBytes?: nu
     step(`reading ${p.file}: handing on the elements`, { total: m.elements.length });
     m.elements.forEach((e, i) => { delete e.node; o.each(e, base + i, g?.boxesOf(base + i) ?? 0, shapes ? () => shapes!(base + i) : null); });
     count += m.elements.length;
-    files.push({ file: p.file, revision: m.revision, elements: m.elements.length, read: true, ...(m.units ? { units: m.units } : {}) });
+    files.push({ file: p.file, revision: m.revision, elements: m.elements.length, read: true, ...(m.units ? { units: m.units } : {}), ...(m.revit ? {} : { unitAssumed: true as const }) });
   }
   return { files, elements: count, geometry: g ? { dir: o.dir!, elements: g.finish(count) } : null };
 }

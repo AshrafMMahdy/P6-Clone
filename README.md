@@ -394,7 +394,9 @@ of the scene no resource draws, such as a context model), checked against the de
 caller says the model's lengths are in, measured from an element of known size, in place of what the file states (none, or
 a wrong one), for any model: the geometry, derived volumes, length labels, 3D view and video, compare and relink, the IFC
 `export_4d` delivers (stated in its copy) and a SYNCHRO project's paths follow it; it is another model in the cache, the
-project's model row keeps it, and `open_model`'s `length_unit` says it was the caller's and what the file states; the TimeLiner inside an `.nwf` / `.nwd` comes in through `import_4d`: tasks with planned and
+project's model row keeps it, and `open_model`'s `length_unit` says it was the caller's and what the file states; while a model's
+unit is only assumed (its file states none the reader can read), every answer that gives sizes carries `unit_note`, telling the agent
+to measure an element of known size and give `length_unit`; the TimeLiner inside an `.nwf` / `.nwd` comes in through `import_4d`: tasks with planned and
 actual dates and type, their selection sets and explicit selections resolved to the model's elements (an `.nwf` names
 items by path in the models it lists), and `link: false` lists the tasks for review),
 `list_elements`, `element_info`, `quantities` (per group: totals, and for the asked `kind` the elements quantified and

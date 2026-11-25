@@ -278,7 +278,7 @@ export function readSynchroModel(bytes: Uint8Array, onObject?: (o: SynchroObject
 // like any IFC (as a Revit file's conversion is, rvt.ts)
 
 /** The conversion's format: a change to what it reads or writes bumps it, so older conversions are not reused. */
-export const SP_FORMAT = 2; // 2: the file's own numbers, its unit stated
+export const SP_FORMAT = 3; // 3: an unknown unit stated as none. 2: the file's own numbers, its unit stated
 
 /** What a SYNCHRO model's conversion read (the answer that opens the model says it). */
 export interface SynchroSource {
@@ -302,11 +302,11 @@ export function isSynchro(path: string): boolean {
  *  assigned it; Group: the groups above it). */
 export function writeSynchroIfc(bytes: Uint8Array, ifcPath: string, file: string): SynchroSource {
   // the file's own numbers, its unit stated (so a unit the caller states in its place, open_model length_unit, scales them as it does any
-  // IFC's); a file whose unit is not known has them taken as metres (its source and notes say assumed), so the model and the paths
-  // import_4d gives agree
+  // IFC's); a file whose unit is not known states none: its numbers are read as metres and the model is known to be in an assumed unit
+  // (every answer that gives sizes says so), the same metres as the paths import_4d gives
   const box = container(bytes, [], ['3DWorldSettings']);
-  const mm = !!box && worldUnit(box.tables.get('3DWorldSettings'), level(box.version, box.schema)).units === 'mm';
-  const w = ifcWriter(ifcPath, { name: file.replace(/\.sp$/i, ''), file, by: 'P6 Clone SYNCHRO reader', ...(mm ? { lengthUnit: 'mm' as const } : {}) });
+  const units = box ? worldUnit(box.tables.get('3DWorldSettings'), level(box.version, box.schema)).units : 'assumed-m';
+  const w = ifcWriter(ifcPath, { name: file.replace(/\.sp$/i, ''), file, by: 'P6 Clone SYNCHRO reader', ...(units === 'mm' ? { lengthUnit: 'mm' as const } : units === 'assumed-m' ? { lengthUnit: 'none' as const } : {}) });
   let k = 0, resources = 0, empty = 0;
   try {
     const m = readSynchroModel(bytes, (o) => {
