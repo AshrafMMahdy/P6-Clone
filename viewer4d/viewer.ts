@@ -29,6 +29,8 @@ interface Options {
   step?: number; growth?: 'none' | 'bottom_up' | 'top_down' | 'left_right' | 'right_left';
   overlays?: ('date' | 'legend' | 'activity_list' | 'gantt_strip' | 's_curve')[]; view?: 'iso' | 'top' | 'front' | 'side' | 'orbit';
   interactive?: boolean; title?: string; background?: string;
+  /** nothing linked (a model-only view, the platform's preview): every element drawn solid, as the model is */
+  modelOnly?: boolean;
 }
 interface TileRec { file: string; bytes: number; elements: number; vertices: number; triangles: number; instances: number; bbox: number[] }
 interface Manifest { format: string; version: number; elements: number; meshed: number; scale: number; bbox: number[]; bytes: number; vertices: number; triangles: number; instances: number; tiles: TileRec[]; guids: string }
@@ -393,7 +395,7 @@ function paint(source: string, asCompare: boolean) {
   for (let o = 0; o < n; o++) {
     const g = groupOf[o] ?? 0;
     let look: Look, s: string;
-    if (!g) { look = L.unlinked; s = 'unlinked'; }
+    if (!g) { look = opt.modelOnly ? L.complete : L.unlinked; s = opt.modelOnly ? 'elements' : 'unlinked'; }
     else if (special(o, g)) { const links = groups[g - 1]; [look, s] = asCompare ? compareLook(links, opt.left!, current, o) : lookOf(links, source, current, o); }
     else [look, s] = gl8[g - 1];
     counts[s] = (counts[s] ?? 0) + 1;

@@ -3,7 +3,7 @@
 // of the two slips found (innerHTML in the viewer, a control byte in a regular expression).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -76,6 +76,19 @@ test('open_model refuses a file that is not an IFC, and keeps the links', async 
   assert.equal(r.err, true);
   assert.match(JSON.stringify(r.d), /not an IFC file/);
   assert.equal((await call('link_status', { handle: h })).d.links, before);
+});
+
+test('open_model: a file named .rvt / .nwd / .sp whose bytes are not that format is refused in that format\'s words, not as "not an IFC"', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'p6-misnamed-'));
+  try {
+    for (const [file, said] of [['Broken.rvt', /Broken\.rvt is named as a Revit file but is not one: a Revit file is an OLE compound file/], ['Broken.nwd', /Broken\.nwd is named as a Navisworks file but is not one: a Navisworks file starts with #LcUStream/], ['Broken.sp', /Broken\.sp is named as a SYNCHRO project but is not one/]] as const) {
+      writeFileSync(join(dir, file), Buffer.alloc(4096, 7));
+      const r = await call('open_model', { path: join(dir, file) });
+      assert.equal(r.err, true, file);
+      assert.match(JSON.stringify(r.d), said);
+      assert.doesNotMatch(JSON.stringify(r.d), /not an IFC file/);
+    }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
 test('render_4d: a P6CLONE_CHROMIUM that is not Chromium fails the call with render_failed; the server lives on', { timeout: 120_000 }, async () => {

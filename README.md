@@ -410,7 +410,9 @@ with; its 3D paths, equipment moved along keyframes during a task, come back in 
 task, each keyframe's share of the task, place and rotation; not animated),
 `simulate_4d` and `compare_4d` (by date, against any saved baseline, with PV / EV by zone), `set_element_status`,
 `render_4d` (a viewer page, PNGs or an MP4 / WebM; the page renders on the GPU of whoever opens it, so a GPU-less
-server needs no Chromium: the platform's client render drives its `WHIQ4D_EXPORT` hooks), `relink_model` (links survive a
+server needs no Chromium: the platform's client render drives its `WHIQ4D_EXPORT` hooks; a model with nothing linked has
+the viewer only, the model as it is with just the view buttons — the platform's preview pane; a `path` ending in `.html`
+names the page itself), `relink_model` (links survive a
 model revision that changes GlobalIds). The links travel with the schedule in `<file>.4d.json`. Optional: `synchro_cloud`
 (Bentley iTwin Schedules API, dormant until `BENTLEY_CLIENT_ID` / `BENTLEY_CLIENT_SECRET` are set) and a Navisworks add-in
 in `addins/navisworks` (source and build script; needs a Navisworks licence, untested without one).

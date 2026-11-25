@@ -94,6 +94,13 @@ export async function loadModel(path: string, o: LoadOptions = {}): Promise<Mode
   try { return await run; } finally { if (inFlight.get(key) === run) inFlight.delete(key); }
 }
 
+/** The formats read as they are, by name: a file so named whose bytes are not that format's is refused in its words. */
+const NATIVE_NAMED: Array<[RegExp, string, string]> = [
+  [/\.(rvt|rfa|rte|rft)$/i, 'a Revit file', 'a Revit file is an OLE compound file, and this one does not start as one does'],
+  [/\.nw[dcf]$/i, 'a Navisworks file', 'a Navisworks file starts with #LcUStream, and this one does not'],
+  [/\.sp$/i, 'a SYNCHRO project', 'its first bytes are not a SYNCHRO project\u2019s header'],
+];
+
 async function loadModelNow(path: string, o: LoadOptions): Promise<Model> {
   if (!existsSync(path)) throw new Error(`No file at ${path}.`);
   if (isNavisworks(path)) return loadNavisworks(path, o);
@@ -104,6 +111,9 @@ async function loadModelNow(path: string, o: LoadOptions): Promise<Model> {
     m.index.sourcePath = path; m.source = source; m.conversion = ifc.slice(0, -'.ifc'.length);
     return m;
   }
+  // named as a format read as it is, but its bytes are not that format's: said as that format (an IFC's refusal would mislead)
+  const named = NATIVE_NAMED.find(([re]) => re.test(path));
+  if (named && !isRevit(path)) throw new Error(`${path} is named as ${named[1]} but is not one: ${named[2]} (a damaged or partly copied file, or another format renamed).`);
   if (!isRevit(path)) return loadIfc(path, o);
   const { ifc, source } = await rvtToIfc(path);
   const m = await loadIfc(ifc, { ...o, hash: undefined });
