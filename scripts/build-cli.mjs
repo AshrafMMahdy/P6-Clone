@@ -19,5 +19,5 @@ cpSync(join(root, 'fonts'), join(root, 'dist-cli/fonts'), { recursive: true });
 await copyReasoner(root, join(root, 'dist-cli'));
 copyIfc(root, join(root, 'dist-cli')); // 4D: the IFC engine
 await copyMpxj(root, join(root, 'dist-cli')); // .mpp: MPXJ (and the Java runtimes P6CLONE_JRE_TARGETS names)
-cpSync(await buildViewer(), join(root, 'dist-cli', 'viewer4d.js')); // 4D: the viewer render_4d writes beside the model
+cpSync(await buildViewer(), join(root, 'dist-cli', 'viewer4d.js')); // 4D: the viewer script render_4d writes inside each page
 console.log('built dist-cli/p6clone.cjs, dist-cli/p6clone-mcp.cjs, dist-cli/fonts/, dist-cli/models/ dist-cli/ort/ (the reasoner runtime and its licences) dist-cli/ifc/ (the IFC engine) and dist-cli/mpxj/ (the .mpp reader)');

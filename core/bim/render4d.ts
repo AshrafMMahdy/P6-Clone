@@ -1,12 +1,13 @@
-// The 4D viewer as files: a page and, beside it, the model's display tiles in a folder of their own (model-<hash>/:
-// manifest.json, tile-NNNNN.glb, elements.txt; core/bim/tiles.ts), fetched by the page relative to itself; or one
-// self-contained page (embed) when the model is small enough to inline. The same page renders videos: in the user's
+// The 4D viewer as files: a page (the viewer script inside it) and, beside it, the model's display tiles in a folder of their own
+// (model-<hash>/: manifest.json, tile-NNNNN.glb, elements.txt; core/bim/tiles.ts), fetched by the page relative to itself when it is
+// served, or handed to it by the window showing it (owner 2026-11-25: the model is never packed into the page, whatever its size;
+// the platform serves the folder with the page). The same page renders videos: in the user's
 // browser or Electron (on their GPU), or in a headless Chromium. The layout and what the page fetches and signals are
 // docs/4d-tiles-contract.md (the White Hat IQ platform serves it by that).
-import { existsSync, mkdirSync, readFileSync, writeFileSync, copyFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { embedMaxBytes, inlineTiles, placeTiles, readManifest, type TilesManifest } from './tiles.ts';
+import { placeTiles, readManifest, type TilesManifest } from './tiles.ts';
 import { GEOM_STRIDE, geomStore } from './element.ts';
 import type { IfcIndex } from './parse.ts';
 
@@ -23,8 +24,8 @@ export function viewerScriptPath(): string | null {
 /** modelOnly: nothing is linked: the model as it is, solid, and only the view buttons (no dates to play or choose) */
 export interface ViewerOptions { layout?: 'single' | 'side_by_side'; left?: string; right?: string; compare?: boolean; lateMeans?: 'start' | 'finish'; step?: number; growth?: string; overlays?: string[]; view?: string; interactive?: boolean; title?: string; modelOnly?: boolean }
 
-/** Where the page finds the model: the tile folder beside it, the tiles inline, or (asked for only) boxes. */
-export type ModelSrc = { tiles: string } | { inline: { manifest: TilesManifest; tiles: string[]; guids?: string } } | { boxes: { manifest: TilesManifest; url?: string; inline?: string } };
+/** Where the page finds the model: the tile folder beside it, or (asked for only) its boxes there. */
+export type ModelSrc = { tiles: string } | { boxes: { manifest: TilesManifest; url: string } };
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
 const STYLE = `html,body{margin:0;height:100%;font:12px Segoe UI,Tahoma,sans-serif;background:#eef1f5;color:#1f2a3a}#bar{display:flex;gap:8px;align-items:center;padding:6px 8px;background:#dfe5ee;border-bottom:1px solid #c4cfe0}#bar input[type=range]{flex:1}#stage{position:absolute;top:36px;left:0;right:0;bottom:0}#stage canvas{position:absolute;inset:0;width:100%;height:100%}#o4d{pointer-events:none}#counts4d{color:#4a5568;white-space:nowrap}button,select{font:inherit}`;
@@ -54,50 +55,28 @@ export interface WriteViewer {
   dir: string; title: string; timeline: unknown; options: ViewerOptions;
   /** the model: its tile folder (from the cache), content hash and index */
   model: { tiles: string; hash: string; index: IfcIndex };
-  /** one self-contained file (the tiles inline): refused for a model past P6CLONE_EMBED_MAX_MB (64) */
-  embed?: boolean;
-  /** the viewer script inside the page, the tiles still beside it (a page served alone: the platform's client render) */
-  inlineScript?: boolean;
   /** each element as its bounding box (only when the caller asked: never a silent stand-in) */
   boxes?: boolean;
+  /** the page's name (index.html when none) */
   file?: string;
 }
 
-/** Write the viewer; answers every file written (the page first). */
+/** Write the viewer: the page, the viewer script inside it, and the model folder beside it; answers every file written (the page first). */
 export function writeViewer(o: WriteViewer): string[] {
   const script = viewerScriptPath();
   if (!script) throw new Error('The 4D viewer (viewer4d.js) is missing beside the program; build it with node scripts/build-viewer4d.mjs.');
   const manifest = readManifest(o.model.tiles);
   if (!manifest) throw new Error('The model has no display tiles.');
   mkdirSync(o.dir, { recursive: true });
-  // a folder viewer is index.html (its script beside it); a page that stands alone takes the name asked for
-  const page = join(o.dir, o.embed || o.inlineScript ? o.file ?? 'viewer.html' : 'index.html');
-  if (o.embed) {
-    let model: ModelSrc;
-    if (o.boxes) model = { boxes: { manifest, inline: Buffer.from(boxesOf(o.model.index).buffer).toString('base64') } };
-    else {
-      if (manifest.bytes > embedMaxBytes()) throw new EmbedTooBig(manifest);
-      const t = inlineTiles(o.model.tiles);
-      model = { inline: { manifest: t.manifest, tiles: t.tiles, guids: readFileSync(join(o.model.tiles, 'elements.txt'), 'utf8') } };
-    }
-    writeFileSync(page, viewerHtml({ title: o.title, model, timeline: o.timeline, options: o.options, script: { inline: readFileSync(script, 'utf8') } }));
-    return [page];
-  }
+  const page = join(o.dir, o.file ?? 'index.html');
   const folder = modelFolder(o.model.hash);
-  const files = placeTiles(o.model.tiles, o.dir, folder);
-  let model: ModelSrc = { tiles: `${folder}/manifest.json` };
-  if (o.boxes) { const f = join(o.dir, folder, 'boxes.bin'); writeFileSync(f, boxesOf(o.model.index)); files.push(f); model = { boxes: { manifest, url: `${folder}/boxes.bin` } }; }
-  const out = [page];
-  if (o.inlineScript) writeFileSync(page, viewerHtml({ title: o.title, model, timeline: o.timeline, options: o.options, script: { inline: readFileSync(script, 'utf8') } }));
-  else {
-    writeFileSync(page, viewerHtml({ title: o.title, model, timeline: o.timeline, options: o.options, script: { src: 'viewer4d.js' } }));
-    copyFileSync(script, join(o.dir, 'viewer4d.js'));
-    out.push(join(o.dir, 'viewer4d.js'));
-  }
-  return [...out, ...files];
-}
-
-/** A self-contained page was asked for a model too big to inline. */
-export class EmbedTooBig extends Error {
-  constructor(m: TilesManifest) { super(`The model's display geometry is ${Math.round(m.bytes / 1048576)} MB in ${m.tiles.length} tiles, past the ${Math.round(embedMaxBytes() / 1048576)} MB a self-contained page carries (P6CLONE_EMBED_MAX_MB).`); }
+  let files: string[], model: ModelSrc;
+  if (o.boxes) {
+    // each element as its box: the folder holds the boxes only (the page carries the manifest it needs; no tile is read)
+    mkdirSync(join(o.dir, folder), { recursive: true });
+    const f = join(o.dir, folder, 'boxes.bin'); writeFileSync(f, boxesOf(o.model.index));
+    files = [f]; model = { boxes: { manifest, url: `${folder}/boxes.bin` } };
+  } else { files = placeTiles(o.model.tiles, o.dir, folder); model = { tiles: `${folder}/manifest.json` }; }
+  writeFileSync(page, viewerHtml({ title: o.title, model, timeline: o.timeline, options: o.options, script: { inline: readFileSync(script, 'utf8') } }));
+  return [page, ...files];
 }

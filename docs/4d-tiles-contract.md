@@ -12,13 +12,19 @@ The model's display geometry is a folder of tiles, one folder per model, beside 
 
 | Call | Files (in `path`) |
 |---|---|
-| `kind: viewer` | `index.html`, `viewer4d.js`, `model-<hash16>/manifest.json`, `model-<hash16>/elements.txt`, `model-<hash16>/tile-00000.glb` … |
-| `kind: viewer, embed: true` | `<project>-4D.html` only (tiles inline as base64). Refused as `too_big_to_embed` past `P6CLONE_EMBED_MAX_MB` (64) of tiles |
-| `kind: video` (or `images`) **without** a server Chromium (the client route) | small model (tiles ≤ 64 MB): `<project>-4D-render.html` only, self-contained, exactly as before. Bigger: `<project>-4D-render.html` (the viewer script inline) **plus** `model-<hash16>/…` |
+| `kind: viewer` | `<project>-4D.html` (the viewer script inside it; a `path` ending in `.html` names it), `model-<hash16>/manifest.json`, `model-<hash16>/elements.txt`, `model-<hash16>/tile-00000.glb` … |
+| `kind: video` (or `images`) **without** a server Chromium (the client route) | `<project>-4D-render.html` (the viewer script inside it) **plus** `model-<hash16>/…` |
 | `kind: video` with a server Chromium | the video only (`<file_name or project-4D>.mp4`); the page and tiles are written to a temp folder, served to the Chromium over 127.0.0.1, deleted after |
-| `boxes: true` (any kind) | the page draws each element as its bounding box from `model-<hash16>/boxes.bin` (or inline). Only when the caller asks: never a silent stand-in |
+| `boxes: true` (any kind) | the page draws each element as its bounding box from `model-<hash16>/boxes.bin`. Only when the caller asks: never a silent stand-in |
 
-The client-route answer (no server Chromium), unchanged in shape, with three new fields when there is a folder:
+The model is never packed into the page, whatever its size (owner, 2026-11-25: the one-file page, `embed: true` up to
+`P6CLONE_EMBED_MAX_MB` = 64 MB, is gone). A page that is served fetches its folder relative to its own address (section 3);
+a page with no address — the platform's preview pane shows a page in a sandboxed frame given its text (`about:srcdoc`) —
+asks the window holding it for each file: it posts `{ source: 'whiq-4d', type: 'file', id, path }` (`path` relative to the
+page: `model-<hash16>/manifest.json`, `…/tile-NNNNN.glb`, `…/elements.txt`, `…/boxes.bin`) and is answered
+`{ source: 'whiq-4d-file', id, bytes: ArrayBuffer }` or `{ …, error }`. The window answers only files of a model folder.
+
+The client-route answer (no server Chromium), with the folder's fields:
 
 ```json
 { "kind": "video", "rendered": false, "viewer": "<out>/P1-4D-render.html",
@@ -99,8 +105,9 @@ model-<hash16>/
 
 ## 3. What the page fetches
 
-The page is `P` (served at some URL with a query string `?Q`). It fetches, relative to its own URL and **carrying its
-own query string** (`new URL(rel, location.href)` with `search = location.search`):
+The page is `P` (served at some URL with a query string `?Q`; a `<base href>` in it moves what its paths are relative to — a
+shared link's page names its link's folder so). It fetches, relative to its own URL and **carrying its
+own query string** (`new URL(rel, document.baseURI)` with `search = location.search`):
 
 1. `model-<hash16>/manifest.json?Q`
 2. `model-<hash16>/tile-00000.glb?Q`, then `tile-00001.glb?Q`, … one at a time, each uploaded to the GPU before the
@@ -111,7 +118,7 @@ own query string** (`new URL(rel, location.href)` with `search = location.search
 Nothing else: the render page carries its viewer script inline, the timeline inline (`window.P6C4D.timeline`, with
 `start` / `finish` as before).
 
-**The platform's one change for big models**: the client route loads the page from
+**The platform's route for the folder**: the client route loads the page from
 `/api/render-job/<id>/page?chatId=…&token=…[&as=…]`, so the tiles arrive at
 `/api/render-job/<id>/model-<hash16>/<file>?chatId=…&token=…[&as=…]`. One route serves them:
 
@@ -124,8 +131,7 @@ r.get('/:id/:folder(model-[0-9a-f]{16})/:file', (req, res) => {
 });
 ```
 
-(`job.pageAbs` is the staged page; the folder is its sibling in out/.) A small model needs no route: its render page
-is self-contained, as today. After the video is made the supervisor offers the page; offering the folder too (each
+(`job.pageAbs` is the staged page; the folder is its sibling in out/.) After the video is made the supervisor offers the page; offering the folder too (each
 file in `client_render.files`) makes the page in the outputs viewable; leaving it fenced keeps the outputs small.
 
 ## 4. What the page signals

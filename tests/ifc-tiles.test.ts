@@ -186,14 +186,15 @@ test('the viewer page signals it has started before the tiles, fails in labelled
   const b = await call('render_4d', { handle: h, path: join(out, 'boxes'), kind: 'viewer', boxes: true });
   assert.equal(b.err, false, JSON.stringify(b.d).slice(0, 300));
   assert.ok(b.d.written.some((p: string) => p.endsWith('boxes.bin')));
+  assert.ok(!b.d.written.some((p: string) => /tile-\d{5}\.glb$|elements\.txt$/.test(p)), 'a boxes page\'s folder holds its boxes only (no tile is read)');
   assert.match(readFileSync(b.d.written[0], 'utf8'), /"model":\{"boxes":/);
-  assert.doesNotMatch(readFileSync(page, 'utf8'), /"boxes"/, 'the default page draws the geometry');
+  assert.match(readFileSync(page, 'utf8'), /"model":\{"tiles":"model-[0-9a-f]{16}\/manifest\.json"\}/, 'the default page draws the geometry (the viewer script inside the page names boxes too)');
   const px = await inChromium(CHROME!, b.d.written[0], (ev) => ev(`new Promise((r) => { const i = new Image(); i.onload = () => { const c = document.createElement('canvas'); c.width = i.width; c.height = i.height; const g = c.getContext('2d'); g.drawImage(i, 0, 0); const d = g.getImageData(0, 0, c.width, c.height).data; let n = 0; for (let k = 0; k < d.length; k += 4) if (Math.abs(d[k] - 238) + Math.abs(d[k + 1] - 241) + Math.abs(d[k + 2] - 245) > 30) n++; r(n); }; i.src = window.P6C4D_API.png('2027-06-01'); })`));
   assert.ok((px as number) > 5000, `${px} pixels drawn`);
 });
 
-test('the render page of a model past the inline limit carries its tiles beside it, every file in written (the client route)', { timeout: 300_000 }, async () => {
-  await withEnv({ P6CLONE_CHROMIUM: undefined, P6CLONE_EMBED_MAX_MB: '0.5' }, async () => {
+test('the render page carries its tiles beside it, whatever the model\'s size, every file in written (the client route)', { timeout: 300_000 }, async () => {
+  await withEnv({ P6CLONE_CHROMIUM: undefined }, async () => {
     const { h } = await linked(join(FX, 'Duplex_A_20110907.ifc'));
     const out = tmp('p6-cr-');
     const r = await call('render_4d', { handle: h, path: out, kind: 'video' });
@@ -205,10 +206,7 @@ test('the render page of a model past the inline limit carries its tiles beside 
     assert.equal(r.d.written[0], r.d.viewer);
     for (const f of r.d.client_render.files) assert.ok(r.d.written.includes(f) && existsSync(f));
     assert.ok(r.d.client_render.files.some((f: string) => /tile-00000\.glb$/.test(f)));
-    // a small model stays one self-contained page (today's platform needs nothing more)
-    const small = await withEnv({ P6CLONE_EMBED_MAX_MB: undefined }, () => call('render_4d', { handle: h, path: tmp('p6-cr2-'), kind: 'video' }));
-    assert.equal(small.d.written, undefined);
-    assert.match(readFileSync(small.d.viewer, 'utf8'), /"model":\{"inline":/);
-    assert.ok(statSync(small.d.viewer).size > 100_000);
+    // the model is never packed into the page (owner 2026-11-25): a small model's page is as any other's
+    assert.doesNotMatch(html, /"model":\{"inline":/);
   });
 });

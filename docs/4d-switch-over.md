@@ -70,8 +70,8 @@ The platform has 9 custom 4D tool slots (10 names: `model_history` and `ifc_diff
    schedule or from `set_element_status`.
 6. **Video timing and naming**: done in v0.1.23 (`seconds_per_frame`, `file_name`).
 7. **Preview events**: the platform tools emit `preview_update` and publish to `Artifacts/`. The clone writes files into
-   the write root; the platform must surface them. A viewer written as a folder (`index.html` plus three files) needs
-   the folder served together; `embed: true` gives one file for the Preview pane.
+   the write root; the platform must surface them. A viewer is the page and its model folder beside it, served together
+   (the model is never in the page: docs/4d-tiles-contract.md).
 8. **.mpp schedules**: the clone's MCP reads .mpp too (`open_file`, `compare`), through MPXJ with the Java runtime shipped in
    `mpxj/` beside the bundle; no Microsoft Project needed. Saving stays XER, P6 XML, MSP XML or MPX (Project opens MSP XML).
 9. **The `WHIQ_4D` check**: the platform's `export_4d_video` refuses an HTML file without the text `WHIQ_4D`. The clone's

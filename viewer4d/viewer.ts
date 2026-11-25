@@ -3,10 +3,11 @@
 // host has none. Bundled by scripts/build-viewer4d.mjs with three.js and mediabunny into one script (viewer4d.js).
 //
 // Input, set before the script runs: window.P6C4D = { model, timeline (core/bim/sim4d.ts viewerTimeline), options }.
-// model is the display tiles (core/bim/tiles.ts, docs/4d-tiles-contract.md): { tiles: "model-<hash>/manifest.json" }
-// (fetched relative to the page, one tile after another, the page's own query string carried along) or { inline:
-// { manifest, tiles: [base64 GLB...], guids } } (a self-contained page of a small model); { boxes: ... } draws each
-// element as its bounding box, only when the caller asked for that. The full geometry is drawn: nothing stands in for
+// model is the display tiles (core/bim/tiles.ts, docs/4d-tiles-contract.md): { tiles: "model-<hash>/manifest.json" }, the
+// model folder beside the page, one tile after another — fetched relative to the page (its own query string carried along) when
+// the page is served, or asked of the parent window when it has no address (the platform's preview pane shows it in a sandboxed
+// frame: the pane fetches each file of the folder and hands it back); { boxes: ... } draws each element as its bounding box, only
+// when the caller asked for that. The full geometry is drawn: nothing stands in for
 // a tile, and a browser that cannot hold the model fails with a labelled error naming its size.
 // Element states follow core/bim/sim4d.ts (same rules, same colours as the docs). Every element's look is one texel of a
 // state texture the shaders read by the element's ordinal, so a frame of millions of elements repaints in milliseconds.
@@ -34,7 +35,7 @@ interface Options {
 }
 interface TileRec { file: string; bytes: number; elements: number; vertices: number; triangles: number; instances: number; bbox: number[] }
 interface Manifest { format: string; version: number; elements: number; meshed: number; scale: number; bbox: number[]; bytes: number; vertices: number; triangles: number; instances: number; tiles: TileRec[]; guids: string }
-type ModelSrc = { tiles: string } | { inline: { manifest: Manifest; tiles: string[]; guids?: string } } | { boxes: { manifest: Manifest; url?: string; inline?: string } };
+type ModelSrc = { tiles: string } | { boxes: { manifest: Manifest; url: string } };
 interface Status { state: 'loading' | 'ready' | 'failed'; tiles: { loaded: number; total: number }; bytes: { loaded: number; total: number }; elements: number; error?: { code: string; message: string } }
 declare global { interface Window { P6C4D: { model: ModelSrc; timeline: Timeline; options?: Options }; WHIQ4D_EXPORT: unknown; P6C4D_API: unknown } }
 
@@ -50,7 +51,7 @@ let actById = new Map(tl.activities.map((a) => [a.task, a]));
 const MB = (n: number) => `${Math.round(n / 1048576).toLocaleString('en')} MB`;
 
 // ── the load status, and the signals the platform waits for ──────────────────────────────────────────────────────
-const manifestOf = (): Manifest | null => ('inline' in cfg.model ? cfg.model.inline.manifest : 'boxes' in cfg.model ? cfg.model.boxes.manifest : null);
+const manifestOf = (): Manifest | null => ('boxes' in cfg.model ? cfg.model.boxes.manifest : null);
 const status: Status = { state: 'loading', tiles: { loaded: 0, total: manifestOf()?.tiles.length ?? 0 }, bytes: { loaded: 0, total: manifestOf()?.bytes ?? 0 }, elements: manifestOf()?.elements ?? tl.elements.count };
 const tell = (type: string, extra: object = {}) => { try { window.parent?.postMessage({ type, ...extra, status: JSON.parse(JSON.stringify(status)) }, '*'); } catch { /* no parent */ } };
 tell('whiq4d:started', { version: 1 });
@@ -214,11 +215,33 @@ const describe = (m: Manifest) => `${MB(m.bytes)} of geometry in ${m.tiles.lengt
 let lost = false;
 canvas.addEventListener('webglcontextlost', (e) => { e.preventDefault(); lost = true; if (status.state !== 'failed') failWith(new LoadFailed('webgl_context_lost', `The browser lost its WebGL context${manifest ? ` holding the 4D model, ${describe(manifest)}` : ''}, after ${status.tiles.loaded} of ${status.tiles.total} tiles (${MB(status.bytes.loaded)}): it could not hold the model on this GPU.`)); }, false);
 let manifest: Manifest | null = manifestOf();
-const relUrl = (rel: string) => { const u = new URL(rel, location.href); u.search = location.search; return u.href; };
+// (relative to the document's base: a shared page names its link's folder as its base)
+const relUrl = (rel: string) => { const u = new URL(rel, document.baseURI); u.search = location.search; return u.href; };
 async function fetchBytes(url: string): Promise<ArrayBuffer> {
   const r = await fetch(url);
   if (!r.ok) throw new LoadFailed('tile_missing', `${url.split('?')[0].split('/').slice(-2).join('/')} could not be fetched (HTTP ${r.status}).`);
   return r.arrayBuffer();
+}
+// A page with no address of its own (about:srcdoc: the platform's preview pane) asks its parent window for each file of its model
+// folder — { source: 'whiq-4d', type: 'file', id, path } — and the parent answers { source: 'whiq-4d-file', id, bytes } or
+// { …, error }. The parent fetches only the files of a model folder (its own rule).
+const served = location.protocol !== 'about:';
+const asking = new Map<number, { ok: (b: ArrayBuffer) => void; fail: (e: Error) => void; path: string }>();
+let askedN = 0;
+addEventListener('message', (e: MessageEvent) => {
+  const d = e.data as { source?: string; id?: number; bytes?: unknown; error?: string } | null;
+  if (e.source !== parent || d?.source !== 'whiq-4d-file' || typeof d.id !== 'number') return;
+  const w = asking.get(d.id); if (!w) return;
+  asking.delete(d.id);
+  if (d.bytes instanceof ArrayBuffer) w.ok(d.bytes);
+  else w.fail(new LoadFailed('tile_missing', `${w.path} could not be fetched (${d.error ?? 'the page holding this view did not give it'}).`));
+});
+/** One file of the model folder, by its path relative to the page. */
+function getFile(rel: string): Promise<ArrayBuffer> {
+  if (served) return fetchBytes(relUrl(rel));
+  if (parent === window) return Promise.reject(new LoadFailed('tile_missing', `${rel} could not be fetched (the page has no address and no window holding it).`));
+  const id = ++askedN;
+  return new Promise((ok, fail) => { asking.set(id, { ok, fail, path: rel }); parent.postMessage({ source: 'whiq-4d', type: 'file', id, path: rel }, '*'); });
 }
 function parseGlb(buf: ArrayBuffer): { json: any; bin: ArrayBuffer; binAt: number } {
   const dv = new DataView(buf);
@@ -329,13 +352,16 @@ const loading = new Promise<void>((res, rej) => { resolveLoad = res; rejectLoad 
 loading.catch(() => { /* reported by status() and the hooks */ });
 function failWith(e: LoadFailed) {
   failure = e; status.state = 'failed'; status.error = { code: e.code, message: e.message };
-  const el = document.getElementById('counts4d'); if (el) el.textContent = e.message;
+  // said on the page: in the counts line, or (the model-only view has none) over the drawing
+  const el = document.getElementById('counts4d');
+  if (el) el.textContent = e.message;
+  else { const d = document.createElement('div'); d.id = 'fail4d'; d.style.cssText = 'position:fixed;left:12px;right:12px;top:48px;z-index:6;max-width:640px;margin:auto;background:#fffffff0;border:1px solid #d5dbe4;border-radius:12px;padding:10px 14px;font:13px/1.6 Segoe UI,Tahoma,sans-serif;color:#1f2a3a'; d.textContent = e.message; document.body.appendChild(d); }
   tell('whiq4d:error', { code: e.code, message: e.message });
   rejectLoad(e);
 }
 async function loadModel() {
   const src = cfg.model;
-  if ('tiles' in src) manifest = JSON.parse(new TextDecoder().decode(await fetchBytes(relUrl(src.tiles)))) as Manifest;
+  if ('tiles' in src) manifest = JSON.parse(new TextDecoder().decode(await getFile(src.tiles))) as Manifest;
   const m = manifest!;
   status.tiles.total = m.tiles.length; status.bytes.total = m.bytes; status.elements = m.elements;
   sizeState(m.elements);
@@ -344,13 +370,13 @@ async function loadModel() {
   fit(m.bbox);
   tell('whiq4d:progress');
   if ('boxes' in src) {
-    const bytes = src.boxes.inline ? b64(src.boxes.inline).buffer : await fetchBytes(relUrl(src.boxes.url!));
+    const bytes = await getFile(src.boxes.url);
     addBoxes(new Float32Array(bytes));
   } else {
     for (const [k, t] of m.tiles.entries()) {
       let group: THREE.Object3D;
       try {
-        const buf = 'inline' in src ? b64(src.inline.tiles[k]).buffer : await fetchBytes(relUrl(`${(src as { tiles: string }).tiles.replace(/[^/]*$/, '')}${t.file}`));
+        const buf = await getFile(`${(src as { tiles: string }).tiles.replace(/[^/]*$/, '')}${t.file}`);
         group = addTile(buf);
         upload(group);
       } catch (e) {
@@ -370,11 +396,11 @@ async function loadModel() {
   tell('whiq4d:ready');
   resolveLoad();
 }
-/** GlobalIds by ordinal (picking and highlighting): inline, or elements.txt beside the manifest. */
+/** GlobalIds by ordinal (picking and highlighting): elements.txt beside the manifest. */
 async function loadGuids() {
   const src = cfg.model;
   try {
-    const text = 'inline' in src ? src.inline.guids ?? '' : 'tiles' in src ? new TextDecoder().decode(await fetchBytes(relUrl(`${src.tiles.replace(/[^/]*$/, '')}${manifest!.guids || 'elements.txt'}`))) : '';
+    const text = 'tiles' in src ? new TextDecoder().decode(await getFile(`${src.tiles.replace(/[^/]*$/, '')}${manifest!.guids || 'elements.txt'}`)) : '';
     guids = text.split('\n'); guidIndex = null;
   } catch { guids = null; }
 }

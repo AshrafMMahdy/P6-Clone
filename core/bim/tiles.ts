@@ -60,14 +60,6 @@ export function placeTiles(src: string, into: string, name: string): string[] {
   return files.map((f) => join(dst, f));
 }
 
-/** Every tile's bytes, base64 (a self-contained page; only for a model small enough: P6CLONE_EMBED_MAX_MB, 64). */
-export function inlineTiles(src: string): { manifest: TilesManifest; tiles: string[] } {
-  const manifest = readManifest(src);
-  if (!manifest) throw new Error('The model has no display tiles.');
-  return { manifest, tiles: manifest.tiles.map((t) => readFileSync(join(src, t.file)).toString('base64')) };
-}
-export const embedMaxBytes = () => (Number(process.env.P6CLONE_EMBED_MAX_MB) || 64) * 1048576;
-
 /** Bytes of a tile folder (0 when it is not there). */
 export function tilesBytes(dir: string | null): number {
   if (!dir || !existsSync(dir)) return 0;

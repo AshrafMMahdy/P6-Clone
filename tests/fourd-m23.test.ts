@@ -66,12 +66,15 @@ test('4D M3: viewer folder (separate model file), self-contained viewer, video a
   const out = mkdtempSync(join(tmpdir(), 'p6-4d-r-'));
   const v = await call('render_4d', { handle: h, path: join(out, 'viewer') });
   assert.equal(v.err, false, JSON.stringify(v.d));
-  // the page, its script, and the model's display tiles in a folder of their own beside it
-  assert.deepEqual(v.d.written.map((p: string) => basename(p)), ['index.html', 'viewer4d.js', 'manifest.json', 'elements.txt', 'tile-00000.glb']);
+  // the page (its script inside it) and the model's display tiles in a folder of their own beside it — whatever the model's size
+  assert.deepEqual(v.d.written.map((p: string) => basename(p)).slice(1), ['manifest.json', 'elements.txt', 'tile-00000.glb']);
+  assert.match(basename(v.d.written[0]), /-4D\.html$/);
+  assert.doesNotMatch(readFileSync(v.d.written[0], 'utf8'), /<script src=/, 'the viewer script is inside the page');
   assert.match(readFileSync(v.d.written[0], 'utf8'), /"model":\{"tiles":"model-[0-9a-f]{16}\/manifest\.json"\}/);
-  assert.equal(basename(dirname(v.d.written[2])), basename(dirname(v.d.written[4])));
-  const e = await call('render_4d', { handle: h, path: join(out, 'one'), embed: true, layout: 'side_by_side', left: 'planned', right: 'best', growth: 'bottom_up' });
-  assert.ok(statSync(e.d.written[0]).size > 1_000_000, 'the model is inside');
+  assert.equal(basename(dirname(v.d.written[1])), basename(dirname(v.d.written[3])));
+  // the model is never packed into the page (owner 2026-11-25): no embed
+  const e = await call('render_4d', { handle: h, path: join(out, 'one'), layout: 'side_by_side', left: 'planned', right: 'best', growth: 'bottom_up' });
+  assert.ok(e.d.written.length > 1 && statSync(e.d.written[0]).size < 1_500_000 && !/"inline"/.test(readFileSync(e.d.written[0], 'utf8')), 'the model is beside the page, not inside');
   const vid = await call('render_4d', { handle: h, path: join(out, 'video'), kind: 'video', step: 14, width: 640, height: 360 });
   assert.equal(vid.err, false, JSON.stringify(vid.d));
   if (!CHROME) { assert.equal(vid.d.rendered, false); assert.equal(vid.d.client_render.hooks, 'WHIQ4D_EXPORT'); return; }
@@ -126,7 +129,7 @@ test('instanced and merged meshes draw the same building, and the same page draw
     (await import('../core/bim/model.ts')).releaseModels(new Set());
     try {
       const { h } = await duplex();
-      const v = await call('render_4d', { handle: h, path: mkdtempSync(join(tmpdir(), 'p6-bv-')), kind: 'viewer', embed: true });
+      const v = await call('render_4d', { handle: h, path: mkdtempSync(join(tmpdir(), 'p6-bv-')), kind: 'viewer' });
       // pixels of the building (not the background, nor the see-through unlinked site), when everything is built
       return { instances: v.d.display.instances, px: await inChromium(CHROME!, v.d.written[0], (ev) => ev(`new Promise((r) => { const i = new Image(); i.onload = () => { const c = document.createElement('canvas'); c.width = i.width; c.height = i.height; const g = c.getContext('2d'); g.drawImage(i, 0, 0); const d = g.getImageData(0, 0, c.width, c.height).data; let n = 0; for (let k = 0; k < d.length; k += 4) if (Math.abs(d[k] - 238) + Math.abs(d[k + 1] - 241) + Math.abs(d[k + 2] - 245) > 80) n++; r(n); }; i.src = window.P6C4D_API.png('2027-06-01'); })`)) as number };
     } finally {
