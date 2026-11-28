@@ -502,14 +502,17 @@ export async function runFourD(name: string, a: Record<string, any>, s: Session,
       if (a.by != null && a.by !== 'storey' && a.by !== 'class') fail('bad_input', 'by must be storey or class.', 'Leave it out for totals.');
       const at = (v: unknown, what: string) => h.dd(v) ?? fail('bad_input', `${what} is not a date.`, 'YYYY-MM-DD');
       const step = countArg(a.step, 'step', { min: 1 }) ?? 7;
-      let dates: number[];
+      let dates: number[], stepsNote: string | undefined;
       if (a.date) dates = [at(a.date, 'date')!];
       else {
         const tl = viewerTimeline(s.db, projId, m.index, [source]);
         const from = a.from ? at(a.from, 'from')! : parseP6Date(tl.start ?? '') ?? fail('no_links', 'No linked activity has dates.', 'Link elements and schedule (F9) first.');
         const to = a.to ? at(a.to, 'to')! : parseP6Date(tl.finish ?? '') ?? from;
+        // AGREED LIMIT (owner, 2026-11-28, item 26 rule 5): 400 — the steps one simulation computes — why: a bound on one call's work; said when
+        // reached, with how to get the rest — arbitrary by agreement.
         dates = []; for (let d = from; d <= to && dates.length < 400; d += step * 1440) dates.push(d);
         if (dates.at(-1)! < to && dates.length < 400) dates.push(to);
+        if (dates.at(-1)! < to) stepsNote = `The simulation stops after 400 steps (${step}-day steps from ${formatP6Date(from).slice(0, 10)} to ${formatP6Date(dates.at(-1)!).slice(0, 10)}); the rest, to ${formatP6Date(to).slice(0, 10)}, is not computed: call again with a larger step, or with from after ${formatP6Date(dates.at(-1)!).slice(0, 10)}.`;
       }
       const r = simulate(s.db, projId, m.index, { source, dates, by: a.by, stepDays: step });
       let snapshots: string[] | undefined, note: string | undefined;
@@ -528,7 +531,7 @@ export async function runFourD(name: string, a: Record<string, any>, s: Session,
           snapshots = pngs.map((png, i) => { const p = join(dir, `snapshot-${String(a.snapshots[i]).slice(0, 10)}.png`); h.writeOut(p, png); return p; });
         }
       }
-      return { ...r, step_days: step, ...(snapshots ? { snapshots } : {}), ...(note ? { note } : {}) };
+      return { ...r, step_days: step, ...(stepsNote ? { steps_note: stepsNote } : {}), ...(snapshots ? { snapshots } : {}), ...(note ? { note } : {}) };
     }
     case 'compare_4d': {
       const m = (await modelOf(s.db, projId))!;
@@ -627,7 +630,10 @@ export async function runFourD(name: string, a: Record<string, any>, s: Session,
       const chrome = kind === 'viewer' ? null : chromiumPath();
       const renderer = chrome ? await probeRenderer(chrome, manifest.bytes) : null;
       const span = (() => { const f = parseP6Date(a.from ? String(a.from) : timeline.start ?? ''), t = parseP6Date(a.to ? String(a.to) : timeline.finish ?? ''); return f != null && t != null && t >= f ? t - f : 30 * 1440; })();
-      const frames = Math.min(kind === 'images' ? 500 : 100_000, Math.floor(span / (options.step! * 1440)) + 1);
+      // AGREED LIMIT (owner, 2026-11-28, item 26 rule 5): 500 pictures, 100,000 video frames — the most one render makes — why: a bound on one
+      // call's work and files; said when reached (frames_note), with how to get the rest — arbitrary by agreement.
+      const FRAME_CAP = kind === 'images' ? 500 : 100_000, wanted = Math.floor(span / (options.step! * 1440)) + 1, frames = Math.min(FRAME_CAP, wanted);
+      const framesNote = wanted > FRAME_CAP ? `This render stops at ${FRAME_CAP} ${kind === 'images' ? 'pictures' : 'frames'} of the ${wanted} its dates and step would give (the first ${FRAME_CAP} steps of ${options.step} days): render again with a larger step, or a narrower from / to, for the rest.` : undefined;
       const planFor = (drawing: 'gpu' | 'software', fellBack?: { reason: string; firstMinutes: number }, pin?: { quality: string; boxes: boolean; width: number; height: number }) => planRender({ kind: drawing, client: !chrome, ...(renderer?.kind === 'gpu' ? { gpuName: renderer.name } : {}), ...(fellBack ? { fellBack } : {}), asked: (pin ? pin.quality : asked) as 'auto' | 'draft' | 'standard' | 'high', boxes: pin ? pin.boxes : a.boxes === true, triangles: manifest.triangles, tileBytes: manifest.bytes, elements: m.index.elements.length, frames, sides: layout === 'side_by_side' ? 2 : 1, width: pin ? pin.width : Number(a.width) || undefined, height: pin ? pin.height : Number(a.height) || undefined });
       // a resume adopts the picture the kept render was drawn with for what the caller left to auto (quality, size, boxes): auto is
       // never decided again, so a load or a remembered card failure that would now pick another plan cannot refuse the resume.
@@ -800,7 +806,7 @@ export async function runFourD(name: string, a: Record<string, any>, s: Session,
         if (!parts || parts.missing().length) await onRenderer(run);
         parts!.settle();
         const left = tidy(parts!);
-        return { kind, rendered: true, ...how(), ...(left ? { note: left } : {}), display: display(), written: dates.map((_, i) => fileOf(i)), ...(resumed ? { resumed_frames: resumed } : {}), ...(parts!.redrawn.length ? { redrawn: parts!.redrawn, redrawn_note: 'Kept parts that did not check out were drawn again.' } : {}) };
+        return { kind, rendered: true, ...how(), ...(left ? { note: left } : {}), ...(framesNote ? { frames_note: framesNote } : {}), display: display(), written: dates.map((_, i) => fileOf(i)), ...(resumed ? { resumed_frames: resumed } : {}), ...(parts!.redrawn.length ? { redrawn: parts!.redrawn, redrawn_note: 'Kept parts that did not check out were drawn again.' } : {}) };
       }
       // the video, in runs: the page encodes a run of frames (P6C4D_API.encode with first and count) as a stream, and each whole chunk of it
       // (cut where the encoder has a key frame) is appended to the run's file as it arrives, with render.json saying how much is whole;
@@ -860,7 +866,7 @@ export async function runFourD(name: string, a: Record<string, any>, s: Session,
       moveInto(joined, file);
       const left = tidy(p);
       if (left) note = note ? `${note} ${left}` : left;
-      return { kind, rendered: true, ...how(), written: [file], frames: total, mime, fps, size: [plan.width, plan.height], segments: segs.length, ...(resumed ? { resumed_frames: resumed, drawn_frames: total - resumed } : {}), ...(p.redrawn.length ? { redrawn: p.redrawn, redrawn_note: 'Kept parts that did not check out were drawn again.' } : {}), ...(p.reused.length ? { reused: p.reused } : {}), display: display(), ...(note ? { note } : {}) };
+      return { kind, rendered: true, ...how(), written: [file], frames: total, ...(framesNote ? { frames_note: framesNote } : {}), mime, fps, size: [plan.width, plan.height], segments: segs.length, ...(resumed ? { resumed_frames: resumed, drawn_frames: total - resumed } : {}), ...(p.redrawn.length ? { redrawn: p.redrawn, redrawn_note: 'Kept parts that did not check out were drawn again.' } : {}), ...(p.reused.length ? { reused: p.reused } : {}), display: display(), ...(note ? { note } : {}) };
       } catch (e) { return failed(e); } finally { if (claimed) rendering.delete(claimed); if (chrome) rmSync(pageDir, { recursive: true, force: true }); }
     }
     case 'relink_model': {
@@ -923,7 +929,8 @@ export function save4dSidecar(db: Db, path: string, projIds: string[], write: (p
   write(p, JSON.stringify({ format: 'p6clone-4d', version: 1, projects }, null, 1));
   return p;
 }
-export function load4dSidecar(db: Db, path: string): number {
+/** The 4D model and links saved beside a schedule (<file>.4d.json): how many were read, or (a damaged file) why none were — the open says so. */
+export function load4dSidecar(db: Db, path: string): number | { damaged: string } {
   const p = `${path}.4d.json`;
   if (!existsSync(p)) return 0;
   try {
@@ -931,5 +938,5 @@ export function load4dSidecar(db: Db, path: string): number {
     let n = 0;
     for (const [code, state] of Object.entries(j.projects ?? {})) { const proj = rows(db, 'PROJECT').find((x) => x.proj_short_name === code && !x._baseline_of); if (proj) n += import4dState(db, proj.proj_id, state); }
     return n;
-  } catch { return 0; }
+  } catch (e) { return { damaged: `${basename(p)} could not be read (${(e as Error).message}), so this schedule opened without its 4D model and links; the file is left as it is.` }; }
 }

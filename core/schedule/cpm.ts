@@ -143,7 +143,8 @@ export function calendarResolver(db: Db, findings: Finding[]) {
   const defRow = rows(db, 'CALENDAR').find((r) => r.default_flag === 'Y');
   const std = new WorkCalendar(standardCalendar());
   const defs = new Map<string, CalendarDef | null>();
-  const def = (id: string, depth = 0): CalendarDef | null => {
+  // `chain`: the calendars whose base is being read, so a base chain that loops back (P6 does not allow one) stops there and is said, with no count
+  const def = (id: string, chain: string[] = []): CalendarDef | null => {
     if (defs.has(id)) return defs.get(id)!;
     const r = byId.get(id);
     if (!r) return null;
@@ -156,7 +157,9 @@ export function calendarResolver(db: Db, findings: Finding[]) {
     }
     d ??= standardCalendar();
     // Project and resource calendars inherit holidays from their base calendar.
-    const base = r.base_clndr_id && r.base_clndr_id !== id && depth < 10 ? def(r.base_clndr_id, depth + 1) : null;
+    const loop = r.base_clndr_id ? [...chain, id].indexOf(r.base_clndr_id) : -1;
+    if (loop >= 0) findings.push({ severity: 'warning', code: 'SCHED_CAL_BASE_LOOP', table: 'CALENDAR', key: id, message: `The base calendars of ${namesText([...chain, id].slice(loop).map((c) => byId.get(c)?.clndr_name ?? c))} name each other in a loop: calendar ${r.clndr_name} inherits no holidays from its base.`, p6: 'P6 does not let a calendar be its own base, directly or through others.' });
+    const base = r.base_clndr_id && loop < 0 ? def(r.base_clndr_id, [...chain, id]) : null;
     if (base) d = inheritExceptions(d, base);
     defs.set(id, d);
     return d;
@@ -682,7 +685,8 @@ export function scheduleProjects(db: Db, projIds: string[], over: Partial<SchedO
     const byWbs = new Map<string, Act[]>();
     if ([...acts.values()].some((a) => a.type === 'TT_WBS')) for (const b of acts.values()) {
       if (b.type === 'TT_WBS' || b.status === 'CO') continue;
-      for (let w: string | undefined = b.row.wbs_id, n = 0; w && n < 200; w = wbsParent.get(w), n++) { let l = byWbs.get(w); if (!l) byWbs.set(w, (l = [])); l.push(b); }
+      // up the WBS to its root; a parent chain that loops back (P6 does not allow one) stops at the first node seen again, with no count
+      for (let w: string | undefined = b.row.wbs_id, seen = new Set<string>(); w && !seen.has(w); seen.add(w), w = wbsParent.get(w)) { let l = byWbs.get(w); if (!l) byWbs.set(w, (l = [])); l.push(b); }
     }
     for (const a of acts.values()) {
       if (a.type !== 'TT_WBS') continue;

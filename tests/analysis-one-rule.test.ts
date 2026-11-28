@@ -37,12 +37,12 @@ test('a population of 2,500 with exactly one failing activity fails every 0 %-th
   assert.deepEqual(c.negative_float.activities.map((a) => a.id), ['T20']);
   assert.deepEqual(c.invalid_dates.activities.map((a) => a.id), ['T30']);
   assert.deepEqual(c.resources.activities.map((a) => a.id), ['T10']);
-  // the same activity in decm (the profile is the only way to change a threshold there): 06A506c finds the same one in the same population, and judges its exact share against the profile's 10 %: 1 of 2,500 passes
+  // the same activity in decm: 06A506b (DCMA's forecast dates before the status date) finds the same one in the same population, and judges its exact share against DCMA's 0 %: 1 of 2,500 fails
   const d = Object.fromEntries(decm(b.db, { statusDate: parseP6Date('2026-01-05 00:00')! }).checks.map((x) => [x.id, x]));
-  assert.deepEqual([d['06A506c'].numerator, d['06A506c'].denominator], [1, c.invalid_dates.denominator]);
-  assert.deepEqual(d['06A506c'].activities.map((a) => a.id), ['T30']);
-  assert.equal(d['06A506c'].result, 'pass');
-  assert.equal(d['06A506c'].threshold!.value, 10);
+  assert.deepEqual([d['06A506b'].numerator, d['06A506b'].denominator], [1, c.invalid_dates.denominator]);
+  assert.deepEqual(d['06A506b'].activities.map((a) => a.id), ['T30']);
+  assert.equal(d['06A506b'].result, 'fail');
+  assert.equal(d['06A506b'].threshold!.value, 0);
 });
 
 test('percentCheck judges the count, and shows a share that is not zero as not zero', () => {
@@ -92,7 +92,7 @@ test('the BEI is one function: dcma_14 (due on or before the status date) and ch
   if (nothing.result === 'not_assessed') assert.equal(nothing.reason, 'no_baseline');
 });
 
-test('the invalid-dates rule is one function: dcma_14 check 9 is its flags in one list, decm 06A506a / b / c its flags in three', () => {
+test('the invalid-dates rule is one function: dcma_14 check 9 is its flags in one list, decm 06A506a / b its flags in two (DCMA\'s split)', () => {
   const b = big();
   const s = makeScope(b.db, { calendarDays: true, statusDate: parseP6Date('2026-01-05 00:00')! });
   const { activities, with_data_date, flagged } = invalidDateFlags(s);
@@ -106,6 +106,6 @@ test('the invalid-dates rule is one function: dcma_14 check 9 is its flags in on
   assert.deepEqual(r.activities.map((a) => [a.id, a.value]), [['T30', 'forecast date before the status date'], ['T40', 'actual date after the status date']]);
   assert.equal(r.denominator, N);
   const d = Object.fromEntries(decm(b.db, { statusDate: parseP6Date('2026-01-05 00:00')! }).checks.map((x) => [x.id, x]));
-  assert.deepEqual(d['06A506a'].activities.map((a) => a.id), ['T40']);
-  assert.deepEqual(d['06A506c'].activities.map((a) => a.id), ['T30', 'T40']);
+  assert.deepEqual(d['06A506a'].activities.map((a) => [a.id, a.value]), [['T40', 'actual start after the status date']]);
+  assert.deepEqual(d['06A506b'].activities.map((a) => a.id), ['T30', 'T40']);
 });

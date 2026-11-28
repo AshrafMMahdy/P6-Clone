@@ -122,7 +122,7 @@ export function dcma14(db: Db, o: DcmaOptions = {}): DcmaReport {
     out.push(percentCheck('high_duration', NAMES.high_duration, T.filter((t) => (dur(t) ?? 0) > limit).map((t) => offender(t, s, `${Math.round(dur(t)! * 10) / 10} d`)), T.length, th('high_duration')!, maxIds));
   }
   {
-    // actual dates after the status date, or forecast dates before it (invalidDateFlags: the one rule, decm's 06A506a / b / c split it in three)
+    // actual dates after the status date, or forecast dates before it (invalidDateFlags: the one rule, decm's 06A506a / b split it in two)
     const { activities, flagged } = invalidDateFlags(s);
     const bad = flagged.map((f) => offender(f.task, s, f.actual_start_after || f.actual_finish_after ? 'actual date after the status date' : 'forecast date before the status date'));
     out.push(percentCheck('invalid_dates', NAMES.invalid_dates, bad, activities.length, th('invalid_dates')!, maxIds));
@@ -179,7 +179,7 @@ export function hardConstraintsCheck(s: Scope, T: Row[], th: Threshold, maxIds: 
 }
 
 export interface DateFlags { task: Row; actual_start_after: boolean; actual_finish_after: boolean; forecast_before: boolean }
-/** DCMA check 9, the one rule (dcma_14's invalid dates; decm's 06A506a / b / c split it in three): of the activities that are not WBS summaries, those in a project with a data date (the status date) whose
+/** DCMA check 9, the one rule (dcma_14's invalid dates; decm's 06A506a / b split it in two): of the activities that are not WBS summaries, those in a project with a data date (the status date) whose
  *  actual start is after it, whose actual finish is after it, or (unfinished) whose forecast date is before it: the forecast start for work not yet started (restart, else early start), the forecast finish
  *  (remaining, else early finish) for any unfinished work. `activities` is the population dcma_14 divides by (every activity that is not a WBS summary, a project with no data date included); `with_data_date`
  *  those that can be judged; `flagged` the ones with at least one flag, in activity order. */

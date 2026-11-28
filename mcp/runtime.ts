@@ -56,15 +56,33 @@ export interface Config {
    *  lists every activity and gives the engine's own whole-day histogram, which the Risks window reads whole. Never set for an MCP server. */
   screens: boolean;
 }
-const num = (v: string | undefined, d: number) => (v && Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : d);
+/** A setting from the environment: absent or empty is the default; anything else must be a positive number, or the server does not start
+ *  and says which (item 26: a mis-set budget no longer runs as the default without a word). */
+const num = (name: string, d: number): number => {
+  const v = process.env[name];
+  if (v == null || v === '') return d;
+  const n = Number(v);
+  if (Number.isFinite(n) && n > 0) return n;
+  throw new Error(`${name}=${JSON.stringify(v)} is not a positive number: set it to one, or unset it for the default (${d}).`);
+};
 export const config: Config = {
   root: null, readRoot: null, writeRoot: null, requireOwnerKey: false,
-  maxHandles: num(process.env.P6CLONE_MAX_HANDLES, 8),
-  budgetBytes: num(process.env.P6CLONE_MEM_BUDGET_MB, 3072) * 1048576,
-  idleMinutes: num(process.env.P6CLONE_IDLE_MINUTES, 30),
-  memFactor: num(process.env.P6CLONE_MEM_FACTOR, 3), // memory per byte of file: a parsed XER takes ~2x, plus undo and schedule work
-  busyWaitMs: num(process.env.P6CLONE_BUSY_WAIT_MS, 20000),
-  softTimeoutMs: num(process.env.P6CLONE_SOFT_TIMEOUT_MS, 25000),
+  // AGREED LIMIT (owner, 2026-11-28, item 26 rule 5): 8 projects open at once (P6CLONE_MAX_HANDLES) — a 9th moves the least recently used idle one out of
+  // memory, or is refused in words when all are busy — why: bounds one server's projects beside its memory budget — arbitrary by agreement.
+  maxHandles: num('P6CLONE_MAX_HANDLES', 8),
+  // AGREED LIMIT (owner, 2026-11-28, rule 5): 3,072 MB memory budget when none is set (the platform sets it from the machine) — work that does not
+  // fit is refused in words before it starts — why: a stand-alone server needs one; necessary because the heap is finite.
+  budgetBytes: num('P6CLONE_MEM_BUDGET_MB', 3072) * 1048576,
+  // AGREED LIMIT (owner, 2026-11-28, rule 5): 30 minutes — a project unused that long is moved out of memory and comes back on its next call (said
+  // then) — why: memory hygiene for a long-running server — arbitrary by agreement.
+  idleMinutes: num('P6CLONE_IDLE_MINUTES', 30),
+  memFactor: num('P6CLONE_MEM_FACTOR', 3), // memory per byte of file: a parsed XER takes ~2x, plus undo and schedule work
+  // AGREED LIMIT (owner, 2026-11-28, rule 5): 20 s a second call on one project waits for the first, then is answered busy with a retry time —
+  // why: no call hangs — arbitrary by agreement.
+  busyWaitMs: num('P6CLONE_BUSY_WAIT_MS', 20000),
+  // AGREED LIMIT (owner, 2026-11-28, rule 5): 25 s — a call not answered by then becomes a job (the work goes on; job_status gives it) — why: an
+  // answer within any client's own time limit — necessary in kind; the number arbitrary by agreement.
+  softTimeoutMs: num('P6CLONE_SOFT_TIMEOUT_MS', 25000),
   // AGREED LIMIT (owner, 2026-11-28): 131,072 characters (128 KiB) — an answer longer than this is cut by structure and kept whole in a
   // file the answer names (mcp/answerCap.ts) — why: the platform's own long-result rule (its resultCap.ts RESULT_CAP_CHARS), the same in
   // every engine so that one used without the platform holds the same rule ("Answer Size - Agreed, unify it") — arbitrary by agreement
@@ -201,7 +219,9 @@ function putAside(file: string, meta: Omit<ClosedMeta, 'closedAt'>): void {
     writeFileSync(`${to}.json`, JSON.stringify({ ...meta, closedAt: Date.now() } satisfies ClosedMeta));
   } catch { /* left where it is */ }
 }
-const keepDays = () => num(process.env.P6CLONE_RECOVERY_KEEP_DAYS, 7);
+// AGREED LIMIT (owner, 2026-11-28, rule 5): 7 days — a closed project's recovery copy whose saved file holds every change is deleted that long after
+// the close (unsaved work is kept for ever) — why: the copy is redundant once saved — arbitrary by agreement.
+const keepDays = () => num('P6CLONE_RECOVERY_KEEP_DAYS', 7);
 const mtime = (p: string) => { try { return statSync(p).mtimeMs; } catch { return null; } };
 /** Why a closed project's file must stay (unsaved work, or its saved file missing or older than its last change),
  *  or null when the saved file holds it all (then it goes keepDays after the close). */
@@ -262,7 +282,7 @@ export function recoveryStatus() {
     if (why) kept.push({ file: f, project_file: m?.path ?? null, handle: m?.handle ?? null, why, since: new Date(m?.closedAt ?? mtime(f) ?? 0).toISOString() });
   }
   for (const [h, e] of evicted) if (e.dirty) kept.push({ file: e.file, project_file: e.savedTo ?? e.path, handle: h, why: 'unsaved changes (moved out of memory; comes back with its handle)', since: new Date(e.at).toISOString() });
-  return { folder: recoveryDir(), all_servers: recoveryBase(), bytes: size(recoveryDir()), bytes_all_servers: size(recoveryBase()), keep_days: keepDays(), kept_unsaved: kept.slice(0, 200), kept_unsaved_total: kept.length };
+  return { folder: recoveryDir(), all_servers: recoveryBase(), bytes: size(recoveryDir()), bytes_all_servers: size(recoveryBase()), keep_days: keepDays(), kept_unsaved: kept };
 }
 
 // ---------------------------------------------------------------- sessions
@@ -279,6 +299,8 @@ export interface Session {
   savedTo?: string;
   /** the keys, with how many rows share each flaw, of what P6 would reject (core/project/integrity.ts) in the project as it was opened: save refuses only what edits added to these or made worse */
   openProblems?: Map<string, number>;
+  /** how many changes fell off the start of the undo history (UNDO_DEPTH): the undo that finds none left says so */
+  undoDropped?: number;
 }
 /** adopted: taken over from a server that is gone (its own exit saved its unsaved work already, or it crashed: the
  *  handle brings it back either way), so the save at exit leaves it to the handle */
@@ -557,11 +579,14 @@ export function change<T>(s: Session, caller: string, label: string, fn: (db: Db
   const j = record(s.db, (d) => { out = fn(d); });
   const after = new Map([...j.arrays.keys()].map((a) => [a, a.slice()]));
   s.history.push({ id: ++changeSeq, label, caller, j, after, at: Date.now() });
-  if (s.history.length > 100) s.history.shift();
+  if (s.history.length > UNDO_DEPTH) { s.history.shift(); s.undoDropped = (s.undoDropped ?? 0) + 1; }
   s.redo.delete(caller);
   s.dirty = true; s.changedAt = Date.now();
   return out;
 }
+// AGREED LIMIT (owner, 2026-11-28, item 26 rule 5): 100 — the changes of a project undo keeps; an older one is no longer undoable, and the undo that
+// finds none left says so — why: each kept change holds a copy of what it changed — arbitrary by agreement.
+export const UNDO_DEPTH = 100;
 /** change for work that awaits between its steps (progress, cancellation): a cancelled or failed run leaves nothing. */
 export async function changeAsync<T>(s: Session, caller: string, label: string, fn: (db: Db) => Promise<T>): Promise<T> {
   let out!: T;
@@ -570,7 +595,7 @@ export async function changeAsync<T>(s: Session, caller: string, label: string, 
   try { j = await recordAsync(s.db, async (d) => { out = await fn(d); }); } finally { changing.delete(s.handle); }
   const after = new Map([...j.arrays.keys()].map((a) => [a, a.slice()]));
   s.history.push({ id: ++changeSeq, label, caller, j, after, at: Date.now() });
-  if (s.history.length > 100) s.history.shift();
+  if (s.history.length > UNDO_DEPTH) { s.history.shift(); s.undoDropped = (s.undoDropped ?? 0) + 1; }
   s.redo.delete(caller);
   s.dirty = true; s.changedAt = Date.now();
   return out;

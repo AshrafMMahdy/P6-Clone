@@ -88,7 +88,7 @@ import { LISTED } from '../core/analysis/common.ts';
 import { criticalityNote, sensitivityNote } from './mcNotes.ts';
 import { dayHours } from '../core/project/units.ts';
 import {
-  MEASURE_FILE_BYTES, heapNow, releaseIfGrown, retainedBytes, ToolError, asRefusal, fail, config, setRoot, setRoots, writeBase, unsavedEvicted, isDirty, pathArg, countArg, numArg, createSession, estimateBytes, getSession, closeSession, forgetEvicted, requireOwner,
+  MEASURE_FILE_BYTES, UNDO_DEPTH, heapNow, releaseIfGrown, retainedBytes, ToolError, asRefusal, fail, config, setRoot, setRoots, writeBase, unsavedEvicted, isDirty, pathArg, countArg, numArg, createSession, estimateBytes, getSession, closeSession, forgetEvicted, requireOwner,
   exclusive, change, changeAsync, followJob, dropLast, regrow, undo, redo, startJob, jobView, getJob, noteSilence, askWake, sweepIdle, sweepJobs, status, sessions, adoptRecovery, checkpointAll, scheduleCheckpoint, evictedList, recoveryStatus, reserveMemory, freeMemory, readCause, type Session,
 } from './runtime.ts';
 
@@ -542,7 +542,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
         }
         s0.db = r.db; s0.openProblems = openProblemsOf(r.db); s0.format = format; /* (openProblems: what P6 would reject in the file as it is; save refuses only what edits add) */ s0.encoding = r.meta ? xerEncoding(r.db, r.meta) : readEncoding(bytes!, format, r.db, a.encoding);
         if (size >= MEASURE_FILE_BYTES) { s0.bytes = retainedBytes(heap0); } // what the project really holds (heap after a full gc, +25 % for undo and schedule work), and the parse's garbage given back
-        load4dSidecar(r.db, path); // <file>.4d.json: the 4D model and links saved with it
+        const side4d = load4dSidecar(r.db, path); // <file>.4d.json: the 4D model and links saved with it (a damaged one is said: item 26)
         // <file>.lob.json: the LOB models as last saved (used when a notebook was damaged outside the clone)
         const lobSide = readLobSidecar(path);
         if (lobSide) lobSidecars.set(s0.handle, lobSide);
@@ -557,7 +557,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
           const list = [...unidentified(r.db).why].map(([t, why]) => { const i = at.get(t) ?? -1; return { table: 'TASK', row: i + 1, ...(r.meta?.taskLines?.[i] ? { line: r.meta.taskLines[i] } : {}), task_id: t.task_id ?? '', activity_id: String(t.task_code ?? ''), reason: why }; }).sort((x, y) => x.row - y.row);
           return list.length ? { unreadable_rows: listedAnswer('unreadable_rows', { total: list.length, rows: list }, ['rows']) } : {};
         };
-        const unreadableNote = () => { const u = unreadable().unreadable_rows; return u ? [`${plural(u.total, 'line')} of the file ${u.total === 1 ? 'is' : 'are'} not loaded as ${u.total === 1 ? 'an activity' : 'activities'} (damaged, no Activity ID): rows ${namesText(u.rows.map((x: any) => String(x.row)))}; save with repair: true removes ${u.total === 1 ? 'it' : 'them'}.`] : []; };
+        const unreadableNote = () => { const u = unreadable().unreadable_rows; return [...(typeof side4d === 'object' ? [side4d.damaged] : []), ...(u ? [`${plural(u.total, 'line')} of the file ${u.total === 1 ? 'is' : 'are'} not loaded as ${u.total === 1 ? 'an activity' : 'activities'} (damaged, no Activity ID): rows ${namesText(u.rows.map((x: any) => String(x.row)))}; save with repair: true removes ${u.total === 1 ? 'it' : 'them'}.`] : [])]; };
         // (a fact of the file a caller must not miss, so it is a field of its own: diagnostics.findings lists the first 40 findings only)
         const noUid = f.some((x) => x.code === 'MPX_NO_UNIQUE_ID') ? { tasks_without_unique_id: true } : {};
         if (a.lenient !== true) return { handle: s0.handle, owner_key: s0.ownerKey, file: basename(path), format, diagnostics: brief(f), ...inSummary(s0, unreadableNote()), ...noUid, ...unreadable(), ...lob };
@@ -911,7 +911,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
           // a finished run removed its kept file: named, so a copy of it elsewhere (the platform's mirror of the outputs) goes too
           ...(!r.partial && !r.keptNote && store.path ? { parts_removed: keptPlace(store.path) } : {}),
           ...(r.partial ? { note: r.partial.error ? `Stopped after ${r.iterations} of ${r.partial.requested} iterations (${String(r.partial.error).replace(/\.$/, '')}): the result covers those only.` : cancelledAfter(r.iterations, r.partial.requested, 'iterations', false) } : {}),
-          ...(() => { const mcProjs = s.db.tables.PROJECT.rows.filter((p: Record<string, string>) => ids.includes(p.proj_id)), differ = differentDatesNote(Object.fromEntries(mcProjs.map((p) => [p.proj_short_name, parseP6Date(p.last_recalc_date) != null ? p.last_recalc_date : null])), 'each project\u2019s own date'); const n = [...dataDateUsedNotes(mcProjs), ...(differ ? [differ] : []), ...(r.redone ? [`${r.redone} kept iteration${r.redone === 1 ? '' : 's'} did not check out (damaged) and ${r.redone === 1 ? 'was' : 'were'} run again.`] : []), ...(!r.partial && r.keptNote ? [r.keptNote] : []), ...(noVariation ? ['No spread: no activity has a three-point estimate and no risk event applies; set estimates with edit set_estimates or pass default_estimates.'] : [])]; return n.length ? { notes: n } : {}; })(),
+          ...(() => { const mcProjs = s.db.tables.PROJECT.rows.filter((p: Record<string, string>) => ids.includes(p.proj_id)), differ = differentDatesNote(Object.fromEntries(mcProjs.map((p) => [p.proj_short_name, parseP6Date(p.last_recalc_date) != null ? p.last_recalc_date : null])), 'each project\u2019s own date'); const n = [...dataDateUsedNotes(mcProjs), ...(differ ? [differ] : []), ...(mc.sampler?.type === 'ratio_empirical' && mc.sampler.ratios.length < 10 ? [`sampler.ratios has ${mc.sampler.ratios.length} ratio${mc.sampler.ratios.length === 1 ? '' : 's'}, fewer than the 10 an empirical draw needs: every ratio was drawn from the sampler's normal (mean ${mc.sampler.normal?.mean ?? 1.12}, std ${mc.sampler.normal?.std ?? 0.28}).`] : []), ...(r.redone ? [`${r.redone} kept iteration${r.redone === 1 ? '' : 's'} did not check out (damaged) and ${r.redone === 1 ? 'was' : 'were'} run again.`] : []), ...(!r.partial && r.keptNote ? [r.keptNote] : []), ...(noVariation ? ['No spread: no activity has a three-point estimate and no risk event applies; set estimates with edit set_estimates or pass default_estimates.'] : [])]; return n.length ? { notes: n } : {}; })(),
         };
         if (a.export == null) return answer;
         // the result files: every list whole, every iteration in the order it ran (a resumed run's kept ones first), the engine's own values
@@ -981,7 +981,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
     case 'undo': {
       if (a.any_caller) requireOwner(s, a.owner_key ?? fail('owner_key_required', 'any_caller undo needs the owner key.', 'Pass owner_key, or undo only your own changes.'), 'Undoing other callers\' changes');
       const r = undo(s, ctx.caller, !!a.any_caller);
-      return r.undone ? { undone: r.undone, by: r.by, your_remaining_changes: s.history.filter((h) => h.caller === ctx.caller).length } : { undone: null, notes: [a.any_caller ? 'Nothing to undo.' : `You (${ctx.caller}) have no change to undo on this project.`] };
+      return r.undone ? { undone: r.undone, by: r.by, your_remaining_changes: s.history.filter((h) => h.caller === ctx.caller).length } : { undone: null, notes: [a.any_caller ? 'Nothing to undo.' : `You (${ctx.caller}) have no change to undo on this project.`, ...(s.undoDropped ? [`Undo keeps the last ${UNDO_DEPTH} changes of a project: ${s.undoDropped} older change${s.undoDropped === 1 ? ' is' : 's are'} no longer undoable.`] : [])] };
     }
     case 'redo': { const r = redo(s, ctx.caller); return r.redone ? r : { redone: null, notes: ['Nothing to redo.'] }; }
     case 'save': {
@@ -1038,7 +1038,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
       await checkpoint(ctx); // nothing is written once the call is cancelled; the write itself is one step
       if (xerOut) writeOutWith(path, xerOut);
       else if (bytes == null && fmt === 'mspdi') writeOutWith(path, (put) => { try { writeMspdiTo(s.db, { projIds: projIds ?? allIds(s.db).slice(0, 1), report: notes }, put); } catch (e) { if (e instanceof MspSaveRefused) fail(e.code, e.message, e.hint); throw e; } });
-      else if (bytes == null) writeOutWith(path, (put) => writeP6XmlTo(s.db, { version: a.version ?? '19.12', projIds }, put));
+      else if (bytes == null) { writeOutWith(path, (put) => writeP6XmlTo(s.db, { version: a.version ?? '19.12', projIds }, put)); if (a.version == null) notes.push('Written as P6 XML version 19.12, the version given when none is asked (pass version for another): a P6 older than 19.12 may refuse it.'); }
       else writeOut(path, bytes);
       // what P6's XML has no place for, with values in this data: said once in the notes, in P6's words, never silent
       let xmlLosses: ReturnType<typeof p6xmlLosses> = [];
@@ -1112,7 +1112,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
         let res = undefined as ReturnType<typeof applyImport> | undefined;
         if (plan.ops.length && !lobRefusal) { const j = record(s.db, (d) => { res = applyImport(d, plan, { hoursPerDay: s.hpd, calendarDays: true }); }); rollback(j); }
         const refused = refusedRows((res as ReturnType<typeof applyImport> | undefined)?.refused ?? []);
-        return { applied: false, summary: plan.summary, notes: tidyNotes([...plan.warnings, ...(refused.length ? [`${plural(refused.length, 'row')} would be refused and skipped by the real run; the rest would be applied.`] : [])]), ...(lobRefusal ? { refused_all: lobRefusal } : {}), ...(refused.length ? { refused } : {}), operations: plan.ops.slice(0, 200).map((o, i) => ({ ...o, sheet_row: `${plan.rows[i].sheet}!${plan.rows[i].row}` })) };
+        return listedAnswer('import_excel', { applied: false, summary: plan.summary, notes: tidyNotes([...plan.warnings, ...(refused.length ? [`${plural(refused.length, 'row')} would be refused and skipped by the real run; the rest would be applied.`] : [])]), ...(lobRefusal ? { refused_all: lobRefusal } : {}), ...(refused.length ? { refused } : {}), operations: plan.ops.map((o, i) => ({ ...o, sheet_row: `${plan.rows[i].sheet}!${plan.rows[i].row}` })) }, ['operations']); // (the first 25 with operations_total, all of them in a file: item 26)
       }
       if (lobRefusal) return { ok: false, error: { code: 'op_failed', message: lobRefusal, hint: 'Use lob_edit for an LOB plan\u2019s durations, crews, locations and logic; progress, notes, resources and other codes edit as usual.' } };
       const res = change(s, ctx.caller, `Import ${basename(path)}`, (d) => applyImport(d, plan, { hoursPerDay: s.hpd, calendarDays: true }));

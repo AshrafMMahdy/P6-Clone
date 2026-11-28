@@ -62,13 +62,14 @@ export const REPORTS: ReportDef[] = [
     id: 'lookahead', group: 'Schedule', title: 'Lookahead (activities in the next weeks)',
     build: (db, projIds, o) => {
       const p = rows(db, 'PROJECT').find((x) => projIds.includes(x.proj_id));
-      const dd = parseP6Date(p?.last_recalc_date) ?? Date.now() / 60000;
+      // a project with no data date is looked ahead from today, and the subtitle says so (item 26: never named a data date it is not)
+      const stated = parseP6Date(p?.last_recalc_date), dd = stated ?? Date.now() / 60000;
       const end = dd + (o.weeks ?? 3) * 7 * MIN_PER_DAY;
       const ts = rows(db, 'TASK').filter((t) => projIds.includes(t.proj_id) && !t.act_end_date).filter((t) => {
         const s = parseP6Date(t.restart_date || t.early_start_date) ?? Infinity;
         return s <= end;
       }).sort((a, b) => (a.restart_date || a.early_start_date || '').localeCompare(b.restart_date || b.early_start_date || ''));
-      return { title: `${o.weeks ?? 3}-Week Lookahead`, subtitle: `from data date ${o.fmtDate(dd)} to ${o.fmtDate(end)}`, columns: ['Activity ID', 'Activity Name', 'Status', 'Start', 'Finish', 'Rem Dur', 'Total Float'], rows: ts.map((t) => ({ cells: [t.task_code, t.task_name, t.act_start_date ? 'In Progress' : 'Not Started', start(t, o), finish(t, o), days(t.remain_drtn_hr_cnt, o, t), days(t.total_float_hr_cnt, o, t)] })) };
+      return { title: `${o.weeks ?? 3}-Week Lookahead`, subtitle: `${stated != null ? 'from data date' : 'from today (the project has no data date)'} ${o.fmtDate(dd)} to ${o.fmtDate(end)}`, columns: ['Activity ID', 'Activity Name', 'Status', 'Start', 'Finish', 'Rem Dur', 'Total Float'], rows: ts.map((t) => ({ cells: [t.task_code, t.task_name, t.act_start_date ? 'In Progress' : 'Not Started', start(t, o), finish(t, o), days(t.remain_drtn_hr_cnt, o, t), days(t.total_float_hr_cnt, o, t)] })) };
     },
   },
   {

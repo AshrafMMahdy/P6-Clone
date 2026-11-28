@@ -260,7 +260,8 @@ export function readNavisworksTimeliner(path: string, o: { maxBytes?: number } =
   const comps: NwPathComponent[] = nwf ? decodePathMap(section(c, 'LcOpNwfPathMap', max) ?? new Uint8Array()) : [];
   const nodeOf = (k: number, tree: NwTree): NwNode | null => {
     const chain: NwPathComponent[] = [];
-    for (let i = k - 1, n = 0; i >= 0 && n < 100; i = comps[i].parent, n++) { if (!comps[i]) return null; chain.unshift(comps[i]); if (comps[i].parent < 0) break; }
+    // up to the root; a parent chain that loops back (a damaged map) stops at the first component seen again, with no count
+    for (let i = k - 1, seen = new Set<number>(); i >= 0 && !seen.has(i); seen.add(i), i = comps[i].parent) { if (!comps[i]) return null; chain.unshift(comps[i]); if (comps[i].parent < 0) break; }
     let level = tree.roots, node: NwNode | null = null;
     for (const p of chain) {
       node = level[p.position]?.name === p.name ? level[p.position] : level.find((x) => x.name === p.name && (x.attr?.display ?? null) === p.attr) ?? null;
@@ -280,7 +281,7 @@ export function readNavisworksTimeliner(path: string, o: { maxBytes?: number } =
         // an item the map names by its GUID, or a part of one (a piece of its geometry), is that element; else it is
         // found by its path
         let c = comps[k - 1];
-        for (let n = 0; c && !c.guid && c.parent >= 0 && n < 100; n++) c = comps[c.parent];
+        for (const seen = new Set<NwPathComponent>(); c && !c.guid && c.parent >= 0 && !seen.has(c); ) { seen.add(c); c = comps[c.parent]; }
         const id = c?.guid ? windowsGuid(c.guid) : null;
         for (const m of models) { if (id && m.byGuid.has(id)) { g = [m.byGuid.get(id)!]; break; } const n = nodeOf(k, m.tree); if (n) { g = m.items.guids(m.items.at.get(n)!); break; } }
       }

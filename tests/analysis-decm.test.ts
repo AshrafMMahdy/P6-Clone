@@ -10,7 +10,7 @@ import { applyOps } from '../core/project/ops.ts';
 import { parseP6Date } from '../core/dates.ts';
 import { readXerFile } from '../core/xer/parseFile.ts';
 import { dcma14 } from '../core/analysis/dcma.ts';
-import { decm, DECM_IDS, DECM_PROFILES } from '../core/analysis/decm.ts';
+import { decm, DECM_IDS, DECM_THRESHOLD_SOURCE } from '../core/analysis/decm.ts';
 import * as B from './benchmark-fixtures.ts';
 import { sampleCopy, testRoots } from './helpers.ts';
 
@@ -42,11 +42,12 @@ test('the 15 checks of guideline 6, in the source\'s order with its names (its t
   assert.ok(!('guidelines' in r) && r.checks.every((c) => !('guideline' in c)));
   assert.equal(r.summary.passed + r.summary.failed + r.summary.not_assessed, 15);
   const names = Object.fromEntries(Object.values(golden.delayed.decm.data.checks_by_guideline).flatMap((g: any) => g.checks).map((c: any) => [c.check_id, c.check_name]));
-  // 06A506c is named for the clone's rule (a forecast date BEFORE the data date: remaining work starts ON it in P6); the source's name says on/before the status date
-  for (const c of r.checks) assert.equal(c.name, c.id === '06A506c' ? 'Incomplete forecast before the data date' : names[c.id], c.id);
-  assert.equal(names['06A506c'], 'Incomplete forecast on/before status date');
+  // 06A506a / b / c are DCMA's (actual dates after the status date; forecast dates before it; a forecast riding it): the source split the invalid dates in three its own way
+  const DCMA_506: Record<string, string> = { '06A506a': 'Actual dates after the status date', '06A506b': 'Forecast dates before the status date', '06A506c': 'Forecast riding the status date' };
+  for (const c of r.checks) assert.equal(c.name, DCMA_506[c.id] ?? names[c.id], c.id);
+  assert.deepEqual([names['06A506a'], names['06A506b'], names['06A506c']], ['Actual start after status date', 'Actual finish after status date', 'Incomplete forecast on/before status date']);
   assert.equal(r.report, 'DCMA DECM schedule checks');
-  assert.equal(r.profile, 'default');
+  assert.ok(!('profile' in r), 'one set of thresholds, DCMA\'s: no profile');
 });
 
 test('the source\'s results where the clone\'s inputs coincide: lags, out-of-sequence (a started activity), progress with no start, actuals after the status date, hard constraints, dangling activities', () => {
@@ -64,7 +65,7 @@ test('the source\'s results where the clone\'s inputs coincide: lags, out-of-seq
   assert.equal(g['06A212a'].result, 'fail');
   assert.deepEqual(ids(g['06A212a']), sg['06A212a'].evidence);
   assert.equal(`${g['06A212a'].numerator}/${g['06A212a'].denominator}`, `${sg['06A212a'].violation_count}/${sg['06A212a'].total_items}`);
-  for (const id of ['06A204b', '06A205a', '06A209a', '06A505a', '06A505b', '06A506a', '06A506b', '06A506c']) assert.equal(g[id].result, sg[id].status, `gaming ${id}`);
+  for (const id of ['06A204b', '06A205a', '06A209a', '06A505a', '06A505b']) assert.equal(g[id].result, sg[id].status, `gaming ${id}`);
   // gamingCurrent as it is (T2 25 % with no actual start): the source's progress with no start is the clone's too (06A505a fails in both), but the source also calls it out-of-sequence (it reads the percent); the clone's rule needs an actual start
   const gc = by(decm(B.gaming().current.db, { statusDate: at('2026-01-29') })), sc = srcChecks('gamingCurrent', 'decm');
   assert.equal(gc['06A505a'].result, 'fail');
@@ -75,7 +76,7 @@ test('the source\'s results where the clone\'s inputs coincide: lags, out-of-seq
   // every fixture: the ids of the dangling activities, hard constraints and lag agree (06A205a / 06A209a / 06A204b) wherever the source flags something
   for (const [name, build] of FIXTURES) {
     const c = by(decm(build().db, { statusDate: at('2026-01-20') })), s = srcChecks(name, 'decm');
-    for (const id of ['06A205a', '06A209a', '06A505a', '06A505b', '06A506a', '06A506b']) assert.equal(c[id].result, s[id].status, `${name} ${id}`);
+    for (const id of ['06A205a', '06A209a', '06A505a', '06A505b']) assert.equal(c[id].result, s[id].status, `${name} ${id}`);
     assert.equal(c['06A204b'].result, s['06A204b'].status, `${name} 06A204b`);
     assert.equal(c['06A401a'].result, s['06A401a'].status, `${name} 06A401a: a valid continuous critical path in both`);
   }
@@ -96,15 +97,15 @@ test('EXPECTED DIFFERENCES from the source\'s results, each with its reason', ()
   assert.equal(d['06A501a'].result, 'pass');
   assert.deepEqual([d['06A501a'].numerator, d['06A501a'].denominator], [0, 3]);
   assert.equal(sd['06A501a'].status, 'pass');
-  // 3. the source's fixtures carry no forecast dates, so its 06A506c never finds anything; the clone has the real forecast dates, and a status date later than the file's own schedule makes the forecast of unfinished work lie before it.
+  // 3. the source's fixtures carry no forecast dates, so its forecast check (its 06A506c; DCMA's 06A506b) never finds anything; the clone has the real forecast dates, and a status date later than the file's own schedule makes the forecast of unfinished work lie before it.
   //    cleanChain, scheduled at 5 Jan and judged at 20 Jan: T1 (starts 5 Jan) and T2 (10 Jan) are not yet started and forecast to start before 20 Jan; T3 starts on 20 Jan (not before)
-  assert.equal(c['06A506c'].result, 'fail');
-  assert.deepEqual(ids(c['06A506c']), ['T1', 'T2']);
+  assert.equal(c['06A506b'].result, 'fail');
+  assert.deepEqual(ids(c['06A506b']), ['T1', 'T2']);
   assert.equal(srcChecks('cleanChain', 'decm')['06A506c'].status, 'pass');
   // judged at the file's own data date there is nothing to find
   const own = by(decm(B.cleanChain().db, {}));
-  assert.equal(own['06A506c'].result, 'pass');
-  assert.equal(own['06A506c'].numerator, 0);
+  assert.equal(own['06A506b'].result, 'pass');
+  assert.equal(own['06A506b'].numerator, 0);
   // 4. a loop: the source scores the critical path of its best-effort CPM; the clone's check fails and names the loop (P6 cannot schedule it)
   const loop = by(decm(B.withCycle().db, {}));
   assert.equal(loop['06A401a'].result, 'fail');
@@ -168,13 +169,16 @@ test('06A504a/b: an actual start / finish that differs from the one an earlier u
   const upd = [...history.map((h) => ({ name: h.snapshot_date, db: h.build.db, projId: h.build.projId })), { name: 'current', db: current.db, projId: current.projId }];
   const r = by(decm(current.db, { statusDate: at('2026-01-29'), updates: upd }));
   const s = srcChecks('gaming', 'decm_history_status_2026_01_29');
-  // T1's actual start was 5 Jan in the 15 Jan update and 7 Jan afterwards: retroactively changed (the source: T1, from the first start it saw)
+  // T1's actual start was 5 Jan in the 15 Jan update and 7 Jan afterwards: retroactively changed (the source: T1, from the first start it saw); DCMA's population is the activities
+  // that had an actual start in the earlier update: T1 alone (the source counted every activity)
   assert.deepEqual(ids(r['06A504a']), ['T1']);
   assert.deepEqual(s['06A504a'].evidence, ['T1']);
-  assert.deepEqual([r['06A504a'].numerator, r['06A504a'].denominator], [1, 2]);
+  assert.deepEqual([r['06A504a'].numerator, r['06A504a'].denominator], [1, 1]);
   assert.equal(r['06A504a'].result, 'fail');
   assert.match(String(r['06A504a'].activities[0].value), /2026-01-15: 2026-01-05 00:00 -> 2026-01-22: 2026-01-07 00:00/);
-  assert.equal(r['06A504b'].result, 'pass');
+  // no activity had an actual finish in an earlier update: DCMA's population is empty, so 06A504b is not assessed (the source passes it)
+  assert.equal(r['06A504b'].result, 'not_assessed');
+  assert.match(r['06A504b'].note!, /no activity had an actual finish in an earlier update/);
   assert.equal(s['06A504b'].status, 'pass');
   // handed in a different order, the updates are read in data-date order
   const shuffled = by(decm(current.db, { statusDate: at('2026-01-29'), updates: [upd[2], upd[0], upd[1]] }));
@@ -207,15 +211,15 @@ test('the series is ordered by data date with the OPEN project in it: the open p
   assert.deepEqual(r.updates.map((u) => u.open_project).filter(Boolean).length, 1);
 });
 
-test('06A506c is "before the data date": a forecast ON the data date is not flagged, one before is (the forecast START of unstarted work counts too); the method note lists both differences from the source, and the populations of 06A204b / 06A205a / 06A209a', () => {
+test('06A506b is "before the data date": a forecast ON the data date is not flagged, one before is (the forecast START of unstarted work counts too)', () => {
   const b = B.project('DD', [{ id: 'A', duration_days: 3 }, { id: 'B', duration_days: 3 }, { id: 'C', duration_days: 3 }], { start: '2026-01-05', dataDate: '2026-01-10' });
   const T = Object.fromEntries(rows(b.db, 'TASK').filter((t) => t.proj_id === b.projId).map((t) => [t.task_code, t]));
   // A: forecast start 5 Jan (before the data date 10 Jan), finish 12 Jan; B: starts ON 10 Jan; C: starts 11 Jan
   Object.assign(T.A, { early_start_date: '2026-01-05 00:00', restart_date: '2026-01-05 00:00', early_end_date: '2026-01-12 00:00', reend_date: '2026-01-12 00:00' });
   Object.assign(T.B, { early_start_date: '2026-01-10 00:00', restart_date: '2026-01-10 00:00', early_end_date: '2026-01-10 00:00', reend_date: '2026-01-10 00:00' });
   Object.assign(T.C, { early_start_date: '2026-01-11 00:00', restart_date: '2026-01-11 00:00', early_end_date: '2026-01-12 00:00', reend_date: '2026-01-12 00:00' });
-  const r = decm(b.db, {}), c = by(r)['06A506c'];
-  assert.equal(c.name, 'Incomplete forecast before the data date');
+  const r = decm(b.db, {}), c = by(r)['06A506b'];
+  assert.equal(c.name, 'Forecast dates before the status date');
   assert.deepEqual(ids(c), ['A'], 'A starts before the data date (its finish is later: the source, testing the finish only, would not flag it); B, ON the date in start and finish, is not before it');
 
 
@@ -244,7 +248,8 @@ test('not assessed, with the reason: no data date, no baseline, no earlier updat
   const n = by(decm(aurora, {}));
   for (const id of ['06A506a', '06A506b', '06A506c']) { assert.equal(n[id].result, 'not_assessed', id); assert.match(n[id].note!, /^(Actual start after status date|Actual finish after status date|.+) not assessed: aurora_tower has no data date; pass status_date\.$/, id); }
   const w = by(decm(aurora, { statusDate: at('2025-06-01') }));
-  for (const id of ['06A506a', '06A506b', '06A506c']) assert.notEqual(w[id].result, 'not_assessed', id);
+  for (const id of ['06A506a', '06A506b']) assert.notEqual(w[id].result, 'not_assessed', id);
+  assert.match(w['06A506c'].note!, /^Forecast riding the status date not assessed: no earlier update was given; pass updates\.$/, 'riding needs the update before');
   assert.equal(decm(aurora, {}).status_date, null);
   // the summary counts them
   const sum = decm(aurora, {}).summary;
@@ -256,49 +261,67 @@ test('not assessed, with the reason: no data date, no baseline, no earlier updat
   assert.equal(none.summary.overall, null);
 });
 
-test('a threshold of 0 % is failed by one activity in any population (dcma_14 rounds the share to one decimal first, and passes one in 2000)', () => {
+test('a threshold of 0 % is failed by one activity in any population (dcma_14 rounds the share to one decimal first, and passes one in 2000); one under 5 % passes', () => {
   const trial = readXerFile(sampleCopy('129 trial.xer')).db;
+  // BTAB1193 is started with no remaining duration (100 % by its duration) and no actual finish: 1 of 2068 = 0.05 %, under DCMA's 5 %
   const c = by(decm(trial, {}))['06A505b'];
-  // BTAB1193 is started with no remaining duration (100 % by its duration) and no actual finish: 1 of 2068 = 0.05 %
   assert.deepEqual([c.numerator, c.denominator], [1, 2068]);
   assert.equal(c.metric, 0.05);
-  assert.equal(c.result, 'fail');
+  assert.equal(c.result, 'pass');
   assert.deepEqual(ids(c), ['BTAB1193']);
+  // one hard constraint (Mandatory Start) on one of the 1250 incomplete tasks: 0.08 % fails DCMA's 0 %
+  const t = rows(trial, 'TASK').find((x) => !x.act_end_date && x.task_type === 'TT_Task')!;
+  Object.assign(t, { cstr_type: 'CS_MANDSTART', cstr_date: t.early_start_date });
+  const h = by(decm(trial, {}))['06A209a'];
+  assert.deepEqual([h.numerator, h.denominator, h.metric, h.result], [1, 1250, 0.08, 'fail']);
+  assert.deepEqual(ids(h), [t.task_code]);
 });
 
 // ------------------------------------------------------------------------------------------------ profiles and thresholds
 
-test('profiles: default and strict differ in three thresholds; the profile is the only way to change them; the answer says where each came from', () => {
-  assert.deepEqual(Object.keys(DECM_PROFILES), ['default', 'strict']);
-  // 25 tasks in a chain, one with a hard constraint (4 %): passes the default 5 %, fails strict 2 %; the same one lag in 25 relationships
+test('thresholds: DCMA\'s published values, one set, the source named in each check; no profile and no override', () => {
   const tasks = Array.from({ length: 25 }, (_, i) => ({ id: `A${i + 1}`, duration_days: 2, predecessors: i ? [`A${i}${i === 5 ? ':FS+1' : ''}`] : [], ...(i === 3 ? { constraint: { type: 'start_on', date: '2026-02-01 00:00' } } : {}) }));
   const b = B.project('PROF', tasks);
-  const d = by(decm(b.db, {})), s = by(decm(b.db, { profile: 'strict' }));
+  const d = by(decm(b.db, {}));
+  // 25 tasks in a chain, one with a hard constraint (4 %): fails DCMA's 0 %; 1 lag in 24 relationships (4.2 %) passes its 10 %
   assert.equal(d['06A209a'].metric, 4);
-  assert.equal(d['06A209a'].result, 'pass');
-  assert.deepEqual(d['06A209a'].threshold, { op: '<=', value: 5, source: DECM_PROFILES.default.label });
-  assert.equal(s['06A209a'].result, 'fail');
-  assert.equal(s['06A209a'].threshold!.value, 2);
-  // 1 lag in 24 relationships = 4.2 %: default 5 passes, strict 2 fails
+  assert.equal(d['06A209a'].result, 'fail');
+  assert.deepEqual(d['06A209a'].threshold, { op: '<=', value: 0, source: DECM_THRESHOLD_SOURCE });
   assert.equal(d['06A205a'].result, 'pass');
-  assert.equal(s['06A205a'].result, 'fail');
-  // the other thresholds are 0 % in both, and 06A506c is 10 % / 5 %
-  assert.equal(d['06A506c'].threshold!.value, 10);
-  assert.equal(s['06A506c'].threshold!.value, 5);
-  assert.equal(d['06A204b'].threshold!.value, 0);
-  assert.equal(s['06A204b'].threshold!.value, 0);
+  const value = Object.fromEntries(Object.values(d).map((c) => [c.id, c.threshold?.value ?? null]));
+  assert.deepEqual(value, { '06A204b': 0, '06A205a': 10, '06A208a': 0, '06A209a': 0, '06A210a': 0, '06A212a': 1, '06A401a': value['06A401a'], '06A501a': 5, '06A504a': 10, '06A504b': 10, '06A505a': 5, '06A505b': 5, '06A506a': 5, '06A506b': 0, '06A506c': 1 });
   assert.equal(d['06A401a'].threshold!.op, '=', 'the critical path test keeps dcma_14\'s own threshold');
-  // no override by check id: a thresholds option is not part of the options at all (the agent picks default or strict)
-  assert.deepEqual(by(decm(b.db, { profile: 'strict', ...({ thresholds: { '06A209a': 10 } } as object) }))['06A209a'].threshold, { op: '<=', value: 2, source: DECM_PROFILES.strict.label }, 'a thresholds value is ignored: the strict profile stands');
-  assert.equal(decm(b.db, { profile: 'strict' }).profile, 'strict');
-  // the method note says the values are the source's and unchecked against the DCMA workbook
-  assert.equal((decm(b.db, {}) as any).method, undefined);
+  for (const c of Object.values(d)) if (c.id !== '06A401a') assert.equal(c.threshold!.source, DECM_THRESHOLD_SOURCE, c.id);
+  // a profile or thresholds value is not an option: the thresholds stand
+  assert.deepEqual(by(decm(b.db, { ...({ profile: 'strict', thresholds: { '06A209a': 10 } } as object) }))['06A209a'].threshold, { op: '<=', value: 0, source: DECM_THRESHOLD_SOURCE });
+});
+
+test('06A506c: an activity riding the status date over the update before (not started in both, forecast start within 5 calendar days of each status date; or under way in both, its remaining duration within 2 days of what it was); not assessed with the reason', () => {
+  const acts = ['A', 'B', 'C', 'D', 'E'].map((id) => ({ id, duration_days: 5 }));
+  const prev = B.project('RIDE', acts, { start: '2026-01-05', dataDate: '2026-01-05' });
+  const cur = B.project('RIDE', acts, { start: '2026-01-05', dataDate: '2026-01-12' });
+  const set = (b: typeof prev, code: string, v: Record<string, string>) => Object.assign(rows(b.db, 'TASK').find((t) => t.proj_id === b.projId && t.task_code === code)!, v);
+  // A: not started, forecast start 2 days after each status date: riding. C: not started, 2 days after at the first, 8 days after now: not riding
+  set(prev, 'A', { restart_date: '2026-01-07 00:00', early_start_date: '2026-01-07 00:00' }); set(cur, 'A', { restart_date: '2026-01-14 00:00', early_start_date: '2026-01-14 00:00' });
+  set(prev, 'C', { restart_date: '2026-01-07 00:00', early_start_date: '2026-01-07 00:00' }); set(cur, 'C', { restart_date: '2026-01-20 00:00', early_start_date: '2026-01-20 00:00' });
+  // B: under way in both, remaining 5 d then 4 d (8 h days): riding. D: under way, 5 d then 1 d: not riding. E: complete now: not in the population
+  for (const [code, r1, r2] of [['B', '40', '32'], ['D', '40', '8']] as const) { set(prev, code, { act_start_date: '2026-01-05 00:00', remain_drtn_hr_cnt: r1, restart_date: '2026-01-05 00:00' }); set(cur, code, { act_start_date: '2026-01-05 00:00', remain_drtn_hr_cnt: r2, restart_date: '2026-01-05 00:00' }); }
+  set(prev, 'E', { restart_date: '2026-01-06 00:00', early_start_date: '2026-01-06 00:00' }); set(cur, 'E', { act_start_date: '2026-01-06 00:00', act_end_date: '2026-01-09 00:00', remain_drtn_hr_cnt: '0' });
+  const updates = [{ name: 'first', db: prev.db, projId: prev.projId }, { name: 'now', db: cur.db, projId: cur.projId }];
+  const c = by(decm(cur.db, { updates }))['06A506c'];
+  assert.deepEqual(ids(c), ['A', 'B']);
+  assert.deepEqual([c.numerator, c.denominator, c.metric, c.result], [2, 4, 50, 'fail']);
+  assert.deepEqual(c.activities.map((x) => x.value), ['forecast start 2 d after the status date at first, 2 d after it now', 'remaining duration 5 d at first, 4 d now']);
+  // not assessed: no update; this project the earliest; the update before at the same status date
+  assert.match(by(decm(cur.db, {}))['06A506c'].note!, /no earlier update was given; pass updates\.$/);
+  assert.match(by(decm(prev.db, { updates }))['06A506c'].note!, /this project \(first\) has the earliest data date of the updates given; pass the update before it\.$/);
+  assert.match(by(decm(cur.db, { updates, statusDate: at('2026-01-05') }))['06A506c'].note!, /first, the update before this one, has the same status date or a later one/);
 });
 
 // ------------------------------------------------------------------------------------------------ the real samples
 
 test('129 trial and Detailed Program (progress, no baseline): every figure counted from the file\'s rows', () => {
-  for (const [name, lag, oos, start, finish] of [['129 trial.xer', '535/3841', '78/2068', '2/2068', '1/2068'], ['Detailed Program.xer', '226/731', '3/621', '1/621', '1/621']] as const) {
+  for (const [name, lag, oos, start, finish, either] of [['129 trial.xer', '535/3841', '78/2068', '2/2068', '1/2068', '3/2068'], ['Detailed Program.xer', '226/731', '3/621', '1/621', '1/621', '1/621']] as const) {
     const db = readXerFile(sampleCopy(name)).db;
     const r = by(decm(db, {}));
     const P = rows(db, 'PROJECT')[0], dd = parseP6Date(P.last_recalc_date)!;
@@ -313,12 +336,12 @@ test('129 trial and Detailed Program (progress, no baseline): every figure count
     const oosRows = discrete.filter((t) => t.act_start_date && rows(db, 'TASKPRED').some((x) => x.task_id === t.task_id && x.pred_type === 'PR_FS' && byId.get(x.pred_task_id) && !byId.get(x.pred_task_id)!.act_end_date));
     assert.equal(`${oosRows.length}/${discrete.length}`, oos, `${name} counted from the rows`);
     assert.equal(`${r['06A212a'].numerator}/${r['06A212a'].denominator}`, oos, name);
-    // 06A506a/b: actual start / finish after the data date, over the activities that are not WBS summaries
-    const nonWbs = T.filter((t) => t.task_type !== 'TT_WBS');
-    assert.equal(`${nonWbs.filter((t) => t.act_start_date && parseP6Date(t.act_start_date)! > dd).length}/${nonWbs.length}`, start);
-    assert.equal(`${nonWbs.filter((t) => t.act_end_date && parseP6Date(t.act_end_date)! > dd).length}/${nonWbs.length}`, finish);
-    assert.equal(`${r['06A506a'].numerator}/${r['06A506a'].denominator}`, start, name);
-    assert.equal(`${r['06A506b'].numerator}/${r['06A506b'].denominator}`, finish, name);
+    // 06A506a: an actual start or finish after the data date, over the activities that are not WBS summaries (the start and finish counted apart, then together)
+    const nonWbs = T.filter((t) => t.task_type !== 'TT_WBS'), after = (v: string) => !!v && parseP6Date(v)! > dd;
+    assert.equal(`${nonWbs.filter((t) => after(t.act_start_date)).length}/${nonWbs.length}`, start);
+    assert.equal(`${nonWbs.filter((t) => after(t.act_end_date)).length}/${nonWbs.length}`, finish);
+    assert.equal(`${r['06A506a'].numerator}/${r['06A506a'].denominator}`, `${nonWbs.filter((t) => after(t.act_start_date) || after(t.act_end_date)).length}/${nonWbs.length}`, name);
+    assert.equal(`${r['06A506a'].numerator}/${r['06A506a'].denominator}`, either, name);
     // no baseline in these files
     assert.equal(r['06A501a'].result, 'not_assessed', name);
     assert.equal(r['06A504a'].result, 'not_assessed', name);
@@ -336,8 +359,8 @@ test('Tower-A (a baseline in the file) and the series Tower-A -> Tower-A_edited:
   // the one relationship with a lag is A1020 -> A1030 SS + 20 h: 1 of the 3
   assert.deepEqual([r['06A205a'].numerator, r['06A205a'].denominator], [1, 3]);
   // forecast before the data date: A1020 (started, forecast finish 16 Mar) and A1030 (forecast start 19 Mar), 2 of 4 (A1010 is complete, the milestone forecasts 1 Apr 17:00)
-  assert.deepEqual(ids(r['06A506c']).sort(), ['A1020', 'A1030']);
-  assert.equal(r['06A506c'].result, 'fail');
+  assert.deepEqual(ids(r['06A506b']).sort(), ['A1020', 'A1030']);
+  assert.equal(r['06A506b'].result, 'fail');
   // the series: Tower-A (earlier) -> Tower-A_edited (current). Comparing the two files' rows: A1010's actual finish 6 Mar 17:00 -> 08:00 and A1020's actual start 7 Mar 07:00 -> 08:00 are the only changed actuals
   const edited = readXerFile(sampleCopy('Tower-A_edited.xer')).db;
   const earlier = { name: 'Tower-A', db: tw, projId: rows(tw, 'PROJECT').find((p) => !p._baseline_of)!.proj_id };
@@ -345,9 +368,13 @@ test('Tower-A (a baseline in the file) and the series Tower-A -> Tower-A_edited:
   const s = by(decm(edited, { updates: [earlier, cur] }));
   assert.deepEqual(ids(s['06A504a']), ['A1020']);
   assert.deepEqual(ids(s['06A504b']), ['A1010']);
-  assert.deepEqual([s['06A504a'].numerator, s['06A504a'].denominator], [1, 4]);
-  assert.equal(s['06A504a'].metric, 25);
+  // DCMA's population: the activities with an actual start in Tower-A (A1010, A1020: 1 of 2 changed), with an actual finish (A1010: 1 of 1)
+  assert.deepEqual([s['06A504a'].numerator, s['06A504a'].denominator], [1, 2]);
+  assert.equal(s['06A504a'].metric, 50);
   assert.equal(s['06A504a'].result, 'fail');
+  assert.deepEqual([s['06A504b'].numerator, s['06A504b'].denominator], [1, 1]);
+  // both files have the data date 1 Apr 2026 08:00: nothing can ride it
+  assert.match(s['06A506c'].note!, /Tower-A, the update before this one, has the same status date or a later one/);
   assert.match(String(s['06A504b'].activities[0].value), /Tower-A: 2026-03-06 17:00 -> current: 2026-03-06 08:00/);
 });
 
@@ -358,18 +385,17 @@ test('decm through the server: read-only, summary first, 25 activities per check
   const t = (toolsList() as any[]).find((x) => x.name === 'decm');
   assert.ok(t, 'listed');
   assert.deepEqual(t.annotations, { readOnlyHint: true, openWorldHint: false });
-  assert.deepEqual(Object.keys(t.inputSchema.properties), ['handle', 'export', 'export_name', 'project', 'profile', 'baseline', 'status_date', 'updates', 'caller', 'async']);
+  assert.deepEqual(Object.keys(t.inputSchema.properties), ['handle', 'export', 'export_name', 'project', 'baseline', 'status_date', 'updates', 'caller', 'async']);
   assert.deepEqual(t._meta, { 'whiq/files': { read: ['updates[].path'], opens: false } });
-  assert.match(t.description, /have NOT been checked against the DCMA DECM workbook/);
-  assert.doesNotMatch(t.description, /thresholds overrides/);
-  assert.match(t.description, /the profile is the only way to change the thresholds/);
+  assert.match(t.description, /The thresholds are DCMA's published ones, fixed: 06A205a 10 %, 06A212a 1 %, 06A501a 5 %, 06A504a \/ b 10 %, 06A505a \/ b 5 %, 06A506a 5 %, 06A506c 1 %, every other 0\./);
+  assert.doesNotMatch(t.description, /profile|NOT been checked/);
   assert.match(t.description, /all put in data-date order/);
   assert.doesNotMatch(t.description + JSON.stringify(t.inputSchema), /this project is the (last|latest)/);
   const h = await openSample('129 trial.xer');
   const r = await call('decm', { handle: h, bogus: 1 });
   assert.equal(r.err, false, JSON.stringify(r.d).slice(0, 400));
   assert.match(r.d.notes.join(' '), /decm has no argument "bogus"; the call ran without it/);
-  assert.deepEqual(Object.keys(r.d).slice(0, 4), ['report', 'profile', 'status_date', 'baseline'], 'the headline first');
+  assert.deepEqual(Object.keys(r.d).slice(0, 3), ['report', 'status_date', 'baseline'], 'the headline first');
   assert.equal(r.d.summary.passed + r.d.summary.failed + r.d.summary.not_assessed, 15);
   const lags = r.d.checks.find((c: any) => c.id === '06A205a');
   assert.equal(lags.activities.length, 25);
@@ -379,7 +405,7 @@ test('decm through the server: read-only, summary first, 25 activities per check
   assert.ok(csv.rows >= 535);
   assert.equal(JSON.parse(readFileSync(r.d.exported.files.find((f: any) => f.path.endsWith('decm.json')).path, 'utf8')).checks.find((c: any) => c.id === '06A205a').activities.length, 535);
   // refusals
-  for (const [args, msg] of [[{ profile: 'nope' }, /Unknown profile "nope"\./], [{ baseline: 'bl3' }, /No baseline "bl3" for this project/], [{ updates: [] }, /updates must list the other updates\./]] as const) {
+  for (const [args, msg] of [[{ baseline: 'bl3' }, /No baseline "bl3" for this project/], [{ updates: [] }, /updates must list the other updates\./]] as const) {
     const bad = await call('decm', { handle: h, ...args });
     assert.equal(bad.err, true, JSON.stringify(args));
     assert.match(bad.d.error.message, msg);
@@ -392,13 +418,12 @@ test('decm through the server: read-only, summary first, 25 activities per check
   const viaHandle = await call('decm', { handle: cur, updates: [{ handle: earlier, name: 'first' }] });
   assert.equal(viaHandle.err, false);
   assert.match(viaHandle.d.checks.find((c: any) => c.id === '06A504b').activities[0].value, /^first: /);
-  // the profile is used; a thresholds argument is not one (reported as not used)
+  // a profile or thresholds argument is not one (reported as not used): DCMA's thresholds stand
   const strict = await call('decm', { handle: cur, profile: 'strict', thresholds: { '06A205a': 50 } });
+  assert.match(strict.d.notes.join(' '), /decm has no argument "profile"/);
   assert.match(strict.d.notes.join(' '), /decm has no argument "thresholds"/);
-  const lag = strict.d.checks.find((c: any) => c.id === '06A205a');
-  assert.deepEqual(lag.threshold, { op: '<=', value: 2, source: DECM_PROFILES.strict.label });
-  assert.equal(strict.d.profile, 'strict');
-  assert.equal(strict.d.checks.find((c: any) => c.id === '06A209a').threshold.source, DECM_PROFILES.strict.label);
+  assert.deepEqual(strict.d.checks.find((c: any) => c.id === '06A205a').threshold, { op: '<=', value: 10, source: DECM_THRESHOLD_SOURCE });
+  assert.equal('profile' in strict.d, false);
   // a few activities fit: no note
   const dir = mkdtempSync(join(tmpdir(), 'decm-'));
   const small = await call('open_file', { path: await B.saveXer(B.logicVariety(), dir, 'v.xer') });

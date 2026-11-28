@@ -178,7 +178,7 @@ test('Optimize: the panel’s call is optimize_schedule’s; the table, "the fir
   ok(await run('edit', { handle: np.handle, owner_key: np.owner_key, operations: ops }));
   ok(await run('schedule', { handle: np.handle, owner_key: np.owner_key }));
   const args = optimizeArgs({ project: 'OPT' }, 20, 1);
-  assert.deepEqual(args, { project: 'OPT', samples: 20, seed: 1, max_priority: 0 }, 'the whole placement order, which Apply levels in');
+  assert.deepEqual(args, { project: 'OPT', samples: 20, seed: 1 }, 'no list argument: the screens get the whole placement order, which Apply levels in');
   const out = ok(await run('optimize_schedule', { handle: np.handle, ...args }));
   const n = optimizeNotes(out);
   assert.equal(out.biggest_changes_total, out.biggest_changes.length);
@@ -188,7 +188,7 @@ test('Optimize: the panel’s call is optimize_schedule’s; the table, "the fir
   assert.equal(out.note, undefined); assert.equal(out.partial_note, undefined); assert.equal(out.over_limit_note, undefined);
   for (const c of out.biggest_changes) for (const k of ['id', 'name', 'cpm_start', 'cpm_finish', 'reasoner_start', 'reasoner_finish', 'start_delta_days', 'finish_delta_days']) assert.ok(k in c, `${k} is in each row of the table`);
   assert.match(OPTIMIZE_ADVICE, /^Review the biggest changes before applying; Undo takes the apply back\. Apply makes the new durations current .*WHIQ original duration \(d\).*WHIQ run <N> duration \(d\).*WHIQ duration change \(d\), WHIQ change note and WHIQ leveling rank\.$/);
-  assert.equal(out.order, undefined, 'the placement order is listed as priority (here all of it: max_priority 0), not as the engine’s order');
+  assert.equal(out.order, undefined, 'the placement order is listed as priority (here all of it: the screens get every entry), not as the engine’s order');
   assert.equal(out.priority.length, out.priority_total);
 });
 

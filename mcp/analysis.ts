@@ -355,8 +355,8 @@ export async function runAnalysis(name: string, a: Record<string, any>, s: Sessi
     case 'optimize_schedule': {
       const objective = a.objective ?? 'makespan';
       if (objective !== 'makespan' && objective !== 'min_crash_cost') fail('bad_input', `Unknown objective "${objective}".`, 'Use makespan or min_crash_cost.');
-      const maxChanges = LISTED; // (item 26, rule 3: the first 25, with biggest_changes_total; the result file holds every one)
-      const maxPriority = LISTED; // (the same rule for the placement order: priority_total says how many, priority_rows and the file hold all)
+      // (item 26, rule 3: the first 25, with biggest_changes_total / priority_total; the result file holds every one; the desktop's screens, whose Apply levels in the whole order, get all: 0)
+      const maxChanges = config.screens ? 0 : LISTED, maxPriority = config.screens ? 0 : LISTED;
       // the reasoner plans work that has not started only: a schedule in progress is refused here, before anything runs (either objective, with or without apply)
       const inProgress = reasonerRefusal(s.db, projIds);
       if (inProgress) fail(inProgress.code, inProgress.message, inProgress.hint);

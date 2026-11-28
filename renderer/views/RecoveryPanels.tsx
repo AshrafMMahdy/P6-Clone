@@ -173,8 +173,8 @@ export function OptimizePanel() {
     if (why) return setErr(why);
     setRes(r.out as OptimizeAnswer); setStamp(r.stamp);
   };
-  /** Apply levels in the placement order when activities are on limited resources: the answer carries the whole order (the panel asks
-   *  with max_priority 0), so Apply works on a schedule of any size and does what the tool's apply: true does. */
+  /** Apply levels in the placement order when activities are on limited resources: the answer carries the whole order (the screens get
+   *  every entry), so Apply works on a schedule of any size and does what the tool's apply: true does. */
   const apply = () => {
     if (!res || !stamp) return;
     // refused, as text, when the project changed since the run; a refusal keeps the result

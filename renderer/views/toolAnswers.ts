@@ -152,12 +152,12 @@ export const floatPathText = (p: FloatPath): string => (p.float_days == null ? '
 export const betweenCount = (b: { paths: unknown[]; paths_total: number | string }): string => `the longest ${b.paths.length} of ${b.paths_total}`;
 
 // ---------------------------------------------------------------- Optimize (optimize_schedule)
-/** optimize_schedule's arguments from the panel (as the Export gives them). max_priority 0: the whole placement order, which Apply levels in. */
-export const optimizeArgs = (project: { project?: string }, samples?: number, seed?: number): Record<string, unknown> => ({ ...project, ...(samples != null ? { samples } : {}), ...(seed != null ? { seed } : {}), max_priority: 0 });
+/** optimize_schedule's arguments from the panel (as the Export gives them). The answer to the screens has the whole placement order, which Apply levels in. */
+export const optimizeArgs = (project: { project?: string }, samples?: number, seed?: number): Record<string, unknown> => ({ ...project, ...(samples != null ? { samples } : {}), ...(seed != null ? { seed } : {}) });
 /** An entry of the tool's placement order (`priority`): the Activity ID, or {id, project} when the run covered several projects. */
 export type PriorityEntry = string | { id: string; project: string };
 /** The leveling the Optimize panel's Apply does after the crash changes and F9: P6's leveler given the tool's placement order (`priority`, the
- *  whole order: max_priority 0), as optimize_schedule's apply: true does. An Activity ID shared by several open projects is told apart by
+ *  whole order, as the screens get it), as optimize_schedule's apply: true does. An Activity ID shared by several open projects is told apart by
  *  the project the tool names with it. */
 export function levelInProposedOrder(d: Db, projIds: string[], priority: PriorityEntry[]): void {
   const open = new Set(projIds), name = new Map(rows(d, 'PROJECT').map((p) => [p.proj_id, p.proj_short_name as string])), byKey = new Map<string, string[]>();

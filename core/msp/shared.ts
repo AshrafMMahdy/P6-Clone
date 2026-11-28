@@ -182,17 +182,18 @@ function uniqueName(name: string, used: Set<string>): string {
 export function effectiveCalendars(calRows: Row[]): Map<string, CalendarDef> {
   const byId = new Map(calRows.map((r) => [r.clndr_id, r]));
   const out = new Map<string, CalendarDef>();
-  const def = (id: string, depth: number): CalendarDef => {
+  // `chain`: the calendars whose base is being read; a base chain that loops back (P6 does not allow one) stops there, with no count
+  const def = (id: string, chain: string[]): CalendarDef => {
     const hit = out.get(id);
     if (hit) return hit;
     const r = byId.get(id)!;
     let d: CalendarDef;
     d = scheduledCalendarDef(r); // the week F9 schedules it with (no data: P6's default week from its hours)
-    if (r.base_clndr_id && r.base_clndr_id !== id && byId.has(r.base_clndr_id) && depth < 10) d = inheritExceptions(d, def(r.base_clndr_id, depth + 1));
+    if (r.base_clndr_id && !chain.includes(r.base_clndr_id) && r.base_clndr_id !== id && byId.has(r.base_clndr_id)) d = inheritExceptions(d, def(r.base_clndr_id, [...chain, id]));
     out.set(id, d);
     return d;
   };
-  for (const r of calRows) def(r.clndr_id, 0);
+  for (const r of calRows) def(r.clndr_id, []);
   return out;
 }
 
@@ -418,9 +419,10 @@ export function projectToDb(m: MProject, findings: Finding[], source: string): D
   const calAlias = new Map<string, string>(); // resource-only derived calendars without own changes -> their base
   const resCalUids = new Set(m.resources.map((r) => r.calUid));
   const taskCalUids = new Set(m.tasks.map((t) => t.calUid));
-  const resolvedWeek = (c: MCal, depth = 0): Shift[][] => {
-    const base = c.baseUid && c.baseUid !== c.uid && depth < 10 ? calById.get(c.baseUid) : undefined;
-    const bw = base ? resolvedWeek(base, depth + 1) : null;
+  // `chain`: the calendars whose base is being read; a base chain that loops back stops there, with no count
+  const resolvedWeek = (c: MCal, chain: string[] = []): Shift[][] => {
+    const base = c.baseUid && c.baseUid !== c.uid && !chain.includes(c.baseUid) ? calById.get(c.baseUid) : undefined;
+    const bw = base ? resolvedWeek(base, [...chain, c.uid]) : null;
     return c.week.map((d, i) => d ?? bw?.[i] ?? (i === 0 || i === 6 ? [] : defaultShifts()));
   };
   for (const c of m.calendars) {
