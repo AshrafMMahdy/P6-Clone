@@ -24,7 +24,8 @@ import { detectEncoding, type TextEncodingName } from '../core/encoding.ts';
 import { repairKeys } from '../core/xer/repair.ts';
 import { REFUSED_ACTUALS, repairToValid, unidentified } from '../core/xer/repair-valid.ts';
 import { lostKinds, p6Name, PROGRESS_FIELDS, STATUS_WORDS } from '../core/p6words.ts';
-import { argumentNotUsed, cancelledAfter, cap, dataDateWritten, leveledDatesNote, offBaselineNotes, scheduleRemovesLeveling, splitRefusal, datesNotCurrent, datesNotStored, isDuplicateRowNote, droppedOnSave, listCut, stillWorking, tooLarge, namesText, notRepaired, openedRepaired, plural, withoutAdvice } from '../core/notes.ts';
+import { cutAnswer, truncationNote } from './answerCap.ts';
+import { argumentNotUsed, cancelledAfter, cap, dataDateWritten, leveledDatesNote, offBaselineNotes, scheduleRemovesLeveling, splitRefusal, datesNotCurrent, datesNotStored, isDuplicateRowNote, droppedOnSave, listCut, stillWorking, namesText, notRepaired, openedRepaired, plural, withoutAdvice } from '../core/notes.ts';
 import { validateXer } from '../core/xer/validate.ts';
 import { mspDateChanges, mspUntouched } from '../core/msp/keep.ts';
 import { mspLossNote } from '../core/msp/shared.ts';
@@ -422,7 +423,21 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
   if (name === 'open_model' && a.discard_kept === true) return discardKeptMeshing(a.path, a.length_unit);
   // a value outside an argument's declared enum is refused, naming the accepted values: a tool would otherwise run as if the argument were absent
   // (find_activities status "inprogress" found no rows) or take another value for it (render_4d format "gif" made an mp4). An absent, null or empty value is not a value.
-  const props = ((TOOLS.find((t) => t.name === name)?.inputSchema as { properties?: Record<string, { enum?: unknown[] }> } | undefined)?.properties) ?? {};
+  const props = ((TOOLS.find((t) => t.name === name)?.inputSchema as { properties?: Record<string, { enum?: unknown[]; type?: unknown }> } | undefined)?.properties) ?? {};
+  // A value of the wrong type is refused the same way, naming the type (item 26, owner 2026-11-28, "wrong input — agreed"): it was
+  // taken silently — the text "false" read as true applied a crash, a text where a number belongs listed every row or made a check pass.
+  for (const [k, def] of Object.entries(props)) {
+    const v = a[k], ty = def?.type;
+    if (v == null || v === '' || typeof ty !== 'string') continue;
+    const ok = ty === 'number' || ty === 'integer' ? typeof v === 'number' && Number.isFinite(v) && (ty === 'number' || Number.isInteger(v))
+      : ty === 'boolean' ? typeof v === 'boolean' : ty === 'string' ? typeof v === 'string'
+      : ty === 'array' ? Array.isArray(v) : ty === 'object' ? typeof v === 'object' && !Array.isArray(v) : true;
+    if (ok) continue;
+    const got = typeof v === 'string' ? `the text ${JSON.stringify(v)}` : Array.isArray(v) ? 'a list' : typeof v === 'number' ? `the number ${v}` : typeof v === 'boolean' ? String(v)
+      : typeof v === 'object' ? `an object with the keys ${Object.keys(v as object).slice(0, 5).map((x) => JSON.stringify(x)).join(', ') || '(none)'}` : typeof v;
+    const as = ty === 'number' ? 'a number (not in quotes)' : ty === 'integer' ? 'a whole number (not in quotes)' : ty === 'boolean' ? 'true or false (not in quotes)' : ty === 'string' ? 'text, in quotes' : ty === 'array' ? 'a list' : 'an object';
+    fail('bad_input', `${name}: ${k} must be ${as}; got ${got}.`, `Send ${k} as ${as}, or leave it out. Nothing was run.`);
+  }
   for (const [k, def] of Object.entries(props)) {
     if (!Array.isArray(def?.enum) || a[k] == null || a[k] === '' || def.enum.includes(a[k])) continue;
     fail('bad_input', `${name}: ${k} ${JSON.stringify(a[k])} is not an accepted value. ${k} is one of: ${def.enum.map(String).join(', ')}.`, `Send ${k} as exactly one of ${def.enum.map(String).join(', ')} (or leave it out). Nothing was run.`);
@@ -1450,25 +1465,15 @@ export function toolResult(out: unknown, isError: boolean, tool?: string) {
     const via = tool === 'job_status' && out && typeof out === 'object' && typeof (out as { tool?: unknown }).tool === 'string' ? (out as { tool: string }).tool : null;
     const forTool = via ?? tool;
     const saved = writeResultFile(forTool ?? 'result', text);
-    // what the caller needs beside the preview: the result files (exported), every <list>_note wherever it is in the answer, and arguments_not_used; and a hint
-    // naming only arguments this tool has
-    const answer = out && typeof out === 'object' && !Array.isArray(out) ? (out as Record<string, unknown>) : {};
-    const cuts: string[] = []; // every <list>_note wherever it is in the answer (what is cut and where all of it is)
-    const walk = (v: unknown, depth: number) => {
-      if (!v || typeof v !== 'object' || depth > 6) return;
-      for (const [k, x] of Object.entries(v)) {
-        if (Array.isArray(v) ? false : k === 'exported' || k === 'notes') continue;
-        if (typeof x === 'string') { if (/_note$/.test(k) && !Array.isArray(v)) cuts.push(x); } else walk(x, depth + 1);
-      }
-    };
-    walk(answer, 0);
+    // a hint naming only the arguments of this tool that make an answer smaller
     const known = Object.keys(((TOOLS.find((t) => t.name === forTool)?.inputSchema as { properties?: Record<string, unknown> } | undefined)?.properties) ?? {});
-    const asks = ['limit', 'offset', 'max_rows', 'max_changes', 'project', 'period', 'from', 'to'].filter((k) => known.includes(k)); // (the arguments that make an answer smaller, of those this tool has)
+    const asks = ['limit', 'offset', 'max_rows', 'project', 'period', 'from', 'to'].filter((k) => known.includes(k));
     const ask = asks.length && forTool ? `, or call ${forTool} again asking for less (its ${asks.join(', ')})` : '';
-    structured = { truncated: true, size_chars: text.length, ...(saved ? { saved, written: [saved] } : {}),
-      ...(answer.exported !== undefined ? { exported: answer.exported } : {}), ...Object.fromEntries(['partial', 'resume', 'next_offset'].filter((k) => answer[k] !== undefined).map((k) => [k, answer[k]])),
-      notes: [tooLarge(text.length, saved, ask), ...(typeof answer.note === 'string' ? [answer.note] : []), ...(Array.isArray(answer.notes) ? answer.notes.filter((n): n is string => typeof n === 'string') : []), ...cuts],
-      preview: text.slice(0, 20000) };
+    // the platform's rule: cut by structure (every note, file name and count of the answer kept as they are, lists shortened with a
+    // count of the rest), room left for the note that says so
+    const cut = cutAnswer(out, text, config.maxResponseChars - Math.min(2048, Math.floor(config.maxResponseChars / 4)));
+    const body = cut.value && typeof cut.value === 'object' && !Array.isArray(cut.value) ? (cut.value as Record<string, unknown>) : { result: cut.value };
+    structured = { ...body, result_truncated: truncationNote(text.length, cut, saved, ask), ...(saved ? { written: [...(Array.isArray(body.written) ? body.written : []), saved] } : {}) };
     text = JSON.stringify(structured);
   }
   return { content: [{ type: 'text', text }], structuredContent: structured, isError };

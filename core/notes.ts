@@ -178,7 +178,6 @@ export const cancelledAfter = (done: number, total: number | null, steps: string
 /** A job that is still running. */
 export const stillWorking = (jobId: string): string => `Still working: call job_status with job_id ${jobId} for the result.`;
 /** An answer too large to return whole: where all of it is. */
-export const tooLarge = (chars: number, file: string | null, ask: string): string => file ? `The answer is too large to return (${chars} characters); all of it is in ${file}${ask}.` : `The answer is too large to return (${chars} characters) and could not be written to a file${ask}.`;
 /** A tool given an argument it does not have. */
 /** Activity IDs and baselines (P6 pairs an activity with its baseline activity by Activity ID). `baselines` are baseline names. */
 export interface IdOffBaseline { id: string; project: string; baseline: string; baselineId: string; taken: boolean }

@@ -242,16 +242,15 @@ test('27: the answer too large to return says where all of it is, also when it c
   const h = await built('2026-01-05', Array.from({ length: 80 }, (_, i) => act(`T${i}`, 2)));
   const old = config.maxResponseChars;
   try {
-    config.maxResponseChars = 3000;
+    config.maxResponseChars = 6000;
     const direct = await call('activity_table', { handle: h });
-    assert.equal(direct.note, undefined);
-    assert.match(direct.notes[0], /^The answer is too large to return \(\d+ characters\); all of it is in .*activity_table-result-.*\.json, or call activity_table again asking for less \(its limit, offset, project\)\.$/);
+    assert.match(direct.result_truncated.note, /The whole answer is saved at .*activity_table-result-.*\.json: read the file for the rest, or call activity_table again asking for less \(its limit, offset, project\)\.$/);
     const job = await call('activity_table', { handle: h, async: true });
     let st: any;
     for (let i = 0; i < 100; i++) { st = await call('job_status', { job_id: job.job_id, wait_seconds: 2 }); if (st.status !== 'running') break; }
-    assert.equal(st.truncated, true, JSON.stringify(st).slice(0, 300));
-    assert.match(st.notes[0], /or call activity_table again asking for less \(its limit, offset, project\)\.$/);
-    assert.match(st.saved, /activity_table-result-/);
+    assert.ok(st.result_truncated, JSON.stringify(st).slice(0, 300));
+    assert.match(st.result_truncated.note, /or call activity_table again asking for less \(its limit, offset, project\)\.$/);
+    assert.match(st.result_truncated.full_result_path, /activity_table-result-/);
   } finally { config.maxResponseChars = old; }
 });
 

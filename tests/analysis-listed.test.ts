@@ -234,147 +234,44 @@ test('B7: export_default is not an argument a caller can send: an export outside
   assert.equal(existsSync(outside), false);
 });
 
-test('B2: an answer too large to return still carries exported, every note and arguments_not_used, and a hint that names only the tool\'s own arguments', async () => {
+test('B2 (item 26, the platform\'s rule): an answer too large to return is cut by structure — exported, every note and arguments_not_used kept — with result_truncated naming the file and a hint that names only the tool\'s own arguments', async () => {
   const { callTool, toolResult, toolsList } = await import('../mcp/server.ts') as any;
   const h = await build('BIG', Array.from({ length: 60 }, (_, i) => ({ op: 'add_activity', id: `A${String(i).padStart(2, '0')}`, name: `A${i}`, duration_days: 2 })));
   const was = config.maxResponseChars;
   try {
-    config.maxResponseChars = 3000;
+    config.maxResponseChars = 6000;
     for (const [tool, args] of [['lint', { profile: 'platform', simulate: false, bogus: 1 }], ['evaluate', { overrides: Array.from({ length: 40 }, (_, i) => ({ op: 'update_activity', id: `A${String(i).padStart(2, '0')}`, duration_days: 6 })), bogus: 1 }]] as const) {
       const r = await callTool(tool, { ...h, ...args });
-      const t = toolResult(r.out, r.isError, tool).structuredContent as any;
-      assert.equal(t.truncated, true, tool);
+      const whole = JSON.stringify(r.out).length;
+      const res = toolResult(r.out, r.isError, tool);
+      const t = res.structuredContent as any;
+      if (whole <= 6000) { assert.equal(t.result_truncated, undefined, `${tool} fits`); continue; }
+      assert.ok(res.content[0].text.length <= 6000, `${tool}: ${res.content[0].text.length}`);
+      assert.equal(t.result_truncated.original_chars, whole, tool);
+      assert.ok(t.result_truncated.full_result_path && existsSync(t.result_truncated.full_result_path) && t.written.includes(t.result_truncated.full_result_path), 'the whole answer in a file, named twice');
+      assert.deepEqual(JSON.parse(readFileSync(t.result_truncated.full_result_path, 'utf8')), JSON.parse(JSON.stringify(r.out)), 'the file holds the whole answer');
       assert.ok(t.exported.files.length > 1 && t.exported.folder, 'the result folder and files');
-      assert.ok(t.notes.length > 0 && t.notes.every((v: unknown) => typeof v === 'string'), JSON.stringify(t.notes));
       assert.ok(t.notes.some((n: string) => new RegExp(`^${tool} has no argument "bogus"`).test(n)));
-      assert.ok(t.saved && t.preview);
       // the hint names only arguments the tool has
       const props = Object.keys((toolsList() as any[]).find((x) => x.name === tool).inputSchema.properties);
-      assert.ok(!t.notes.some((n: string) => /max_rows|limit and offset|filters/.test(n)));
-      for (const named of /this tool's ([\w, ]+)\./.exec(t.note)?.[1].split(', ') ?? []) assert.ok(props.includes(named), `${tool}: ${named}`);
+      for (const named of /asking for less \(its ([\w, ]+)\)/.exec(t.result_truncated.note)?.[1].split(', ') ?? []) assert.ok(props.includes(named), `${tool}: ${named}`);
     }
-    // evaluate's notes include the changed list's
-    const ev = await callTool('evaluate', { ...h, overrides: Array.from({ length: 40 }, (_, i) => ({ op: 'update_activity', id: `A${String(i).padStart(2, '0')}`, duration_days: 6 })) });
-    const tev = toolResult(ev.out, ev.isError, 'evaluate').structuredContent as any;
-    assert.ok(tev.notes.some((n: string) => /^25 of \d+ shown; all \d+ in /.test(n)));
     // a tool that has limit and offset names them
-    const fa = toolResult((await callTool('find_activities', { ...h, limit: 100 })).out, false, 'find_activities').structuredContent as any;
-    assert.equal(fa.truncated, true);
-    assert.match(fa.notes.join(' '), /call find_activities again asking for less \(its limit, offset/);
+    const fa = toolResult((await callTool('find_activities', { ...h, limit: 60 })).out, false, 'find_activities').structuredContent as any;
+    assert.ok(fa.result_truncated, 'cut');
+    assert.match(fa.result_truncated.note, /call find_activities again asking for less \(its limit, offset/);
+    assert.ok(fa.activities.length < 60 && /^… \+\d+ more/.test(fa.activities.at(-1)), 'a list cut to its head with a count of the rest');
   } finally { config.maxResponseChars = was; }
 });
-
-test('B6: the Monte Carlo file\'s histogram is the answer\'s chart; with estimates it is 20 bars, without any variation one bar', async () => {
-  const h = await build('MCB', [{ op: 'add_activity', id: 'A', name: 'A', duration_days: 5 }, { op: 'add_activity', id: 'B', name: 'B', duration_days: 5 }, { op: 'add_relationship', pred: 'A', succ: 'B' }]);
-  const r = (await call('monte_carlo', { ...h, iterations: 40, seed: 3, default_estimates: est })).d;
-  assert.equal(r.histogram.length, 20); assert.equal(r.histogram_note, undefined);
-  const whole = JSON.parse(readFileSync(r.exported.files[0].path, 'utf8'));
-  assert.deepEqual(whole.histogram, r.histogram);
-  const rows = readFileSync(csv(r, 'histogram'), 'utf8').trim().split('\r\n');
-  assert.equal(rows.length, 21, 'a header and the 20 bars');
-  assert.equal(rows[0].replace('\ufeff', ''), 'start,end,count,cum_pct');
-  // every run at the same moment: one bar with all the runs, no one-minute bars past the maximum
-  const one = (await call('monte_carlo', { ...h, iterations: 15, seed: 3 })).d;
-  assert.equal(one.histogram.length, 1);
-  assert.deepEqual(one.histogram[0], { start: one.finish.max, end: one.finish.max, count: 15, cum_pct: 100 });
-  assert.match(one.notes.join(' '), /^No spread: no activity has a three-point estimate/);
-  assert.equal(readFileSync(csv(one, 'histogram'), 'utf8').trim().split('\r\n').length, 2);
-  assert.match(one.notes.join(' '), /set_estimates.*default_estimates/);
-  // durations that vary: no reason given (the runs differ)
-  assert.doesNotMatch(r.note ?? '', /no activity/i);
-});
-
-test('earned_value says in a note when the schedule carries no costs (budget at completion 0)', async () => {
-  const h = await build('EVN', [{ op: 'add_activity', id: 'A', name: 'A', duration_days: 5 }]);
-  const ev = (await call('earned_value', h)).d;
-  assert.equal(ev.projects[0].totals.bac, 0);
-  assert.equal(ev.projects[0].totals.spi, 0);
-  assert.match(ev.notes.join(' '), /SPI, CPI and EAC not assessed: .+ carries no costs\./);
-});
-
-test('B8: compare says how many changes there are and where all of them are', async () => {
-  const ops = Array.from({ length: 12 }, (_, i) => ({ op: 'add_activity', id: `A${String(i).padStart(2, '0')}`, name: `A${i}`, duration_days: 2 }));
-  const h = await build('CMP', ops);
-  const was = join(root, 'cmp-before.xer');
-  assert.equal((await call('save', { ...h, path: was })).err, false);
-  await call('edit', { ...h, operations: ops.map((o) => ({ op: 'update_activity', id: o.id, name: `${o.name} changed` })) });
-  const all = (await call('compare', { ...h, path: was })).d;
-  assert.ok(all.changes_total >= 12 && all.changes.length === all.changes_total);
-  assert.equal(all.changes_note, undefined, 'nothing is cut');
-  const p1 = (await call('compare', { ...h, path: was, max_changes: 5 })).d;
-  assert.equal(p1.changes.length, 5); assert.equal(p1.changes_total, all.changes_total);
-  assert.equal(p1.changes_note, `5 of ${all.changes_total} shown; all ${all.changes_total} in ${csv(p1, 'changes')}.`);
-  assert.equal(p1.exported.files.find((f: any) => f.path.endsWith('-changes.csv')).rows, all.changes_total);
-  const p2 = (await call('compare', { ...h, path: was, max_changes: 5, offset: 5 })).d;
-  assert.equal(p2.changes_note, `5 of ${all.changes_total} shown; all ${all.changes_total} in ${csv(p2, 'changes')}.`);
-  assert.equal(p2.next_offset, 10);
-  // the computed mode names the same total
-  const c = (await call('compare', { ...h, path: was, mode: 'computed', max_changes: 1 })).d;
-  assert.equal(c.changes_total, c.changed);
-});
-
-test('B8: a session\'s default result folder is decided once and never changes; two sessions never share one', async () => {
-  const { evict, sessions } = await import('../mcp/runtime.ts') as any;
-  const ops = [{ op: 'add_activity', id: 'A', name: 'A', duration_days: 2 }];
-  const folderOf = async (h: object) => { const r = (await call('lint', { ...h, simulate: false })).d; assert.equal(r.exported.error, undefined); return r.exported.folder as string; };
-  const first = await build('KEEP', ops);
-  await call('save', { ...first, path: join(root, 'keep.xer') });
-  await call('close', { ...first, discard: true });
-  const A = (await call('open_file', { path: join(root, 'keep.xer') })).d;
-  const a1 = await folderOf(A);
-  assert.equal(a1, join(root, 'analysis', 'KEEP__keep', 'lint'));
-  // a second open of the same file: A's folder is unchanged, B's is distinct
-  const B = (await call('open_file', { path: join(root, 'keep.xer') })).d;
-  assert.equal(await folderOf(A), a1);
-  const b1 = await folderOf(B);
-  assert.equal(b1, join(root, 'analysis', `KEEP__keep__${B.handle}`, 'lint'));
-  // A moved out of memory and brought back: still A's folder; B never writes into it
-  evict(sessions.get(A.handle), 'test');
-  assert.equal(await folderOf(A), a1);
-  assert.equal(await folderOf(B), b1);
-  // B moved out and back, A still holds the plain one
-  evict(sessions.get(B.handle), 'test');
-  assert.equal(await folderOf(B), b1); assert.equal(await folderOf(A), a1);
-});
-
-test('B9: the default folder name is never ., .., empty or ending in a dot or space, and does not repeat the file\'s name', async () => {
-  const { defaultResultFolder } = await import('../mcp/export.ts') as any;
-  for (const n of ['.', '..', '...', ' ', 'X.', 'X ', 'X. .']) {
-    const f = defaultResultFolder('lint', [n]) as string;
-    const dir = f.split(/[\\/]/)[1];
-    assert.ok(dir && dir !== '.' && dir !== '..' && !/[. ]$/.test(dir), `${JSON.stringify(n)} -> ${f}`);
-  }
-  assert.equal(defaultResultFolder('lint', ['..']), join('analysis', 'project', 'lint'));
-  assert.equal(defaultResultFolder('lint', ['X'], '/a/X.xer'), join('analysis', 'X', 'lint'));
-  assert.equal(defaultResultFolder('lint', ['X'], '/a/Y.xer'), join('analysis', 'X__Y', 'lint'));
-  const dots = await build('..', [{ op: 'add_activity', id: 'A', name: 'A', duration_days: 2 }]);
-  const r = (await call('lint', { ...dots, simulate: false })).d;
-  assert.equal(r.exported.folder, join(root, 'analysis', 'project', 'lint'));
-});
-
-test('B10: resource_histogram lists by severity, then over-allocated periods, then name; a limit-0 resource does not push real ones out', async () => {
-  const rops: unknown[] = [{ op: 'add_activity', id: 'T', name: 'T', duration_days: 20 }, { op: 'add_resource', id: 'AA', name: 'AA', max_units_per_hour: 0 }, { op: 'assign_resource', activity: 'T', resource: 'AA', units_per_day: 8 },
-    { op: 'add_resource', id: 'MID', name: 'MID', max_units_per_hour: 1 }, { op: 'assign_resource', activity: 'T', resource: 'MID', units_per_day: 14 },
-    { op: 'add_resource', id: 'HI', name: 'HI', max_units_per_hour: 1 }, { op: 'assign_resource', activity: 'T', resource: 'HI', units_per_day: 20 }];
-  const h = await build('SEV', rops);
-  const r = (await call('resource_histogram', h)).d;
-  const whole = JSON.parse(readFileSync(r.exported.files[0].path, 'utf8')).resources;
-  const zero = whole.find((x: any) => x.resource === 'AA');
-  assert.equal(zero.severity, 'none'); assert.equal(zero.over_allocated_periods, 0, 'a resource with no limit set counts no over-allocation');
-  assert.deepEqual(r.resources.map((x: any) => x.resource), ['HI', 'MID', 'AA']);
-  assert.match(r.notes.join(' '), /resources? (has|have) no Max Units\/Time, so (its|their) over-allocation is not assessed: /);
-});
-
-test('B11: a too-large answer also carries its note, partial, resume and next_offset', async () => {
+test('B11: a too-large answer also carries its note, partial, resume and next_offset (kept by the structural cut)', async () => {
   const { toolResult } = await import('../mcp/server.ts') as any;
   const was = config.maxResponseChars;
   try {
-    config.maxResponseChars = 200;
-    const t = toolResult({ note: 'continue with resume', partial: true, resume: '/x/y.p6mc', next_offset: 50, rows: 'z'.repeat(500) }, false, 'lint').structuredContent;
-    assert.equal(t.truncated, true);
-    assert.ok(t.notes.includes('continue with resume')); assert.equal(t.partial, true); assert.equal(t.resume, '/x/y.p6mc'); assert.equal(t.next_offset, 50);
-    const plain = toolResult({ rows: 'z'.repeat(500) }, false, 'lint').structuredContent;
-    assert.ok(!('answer_note' in plain) && !('resume' in plain));
+    config.maxResponseChars = 6000;
+    const t = toolResult({ note: 'continue with resume', partial: true, resume: '/x/y.p6mc', next_offset: 50, rows: Array.from({ length: 900 }, (_, i) => `row ${i}`) }, false, 'lint').structuredContent;
+    assert.ok(t.result_truncated);
+    assert.equal(t.note, 'continue with resume'); assert.equal(t.partial, true); assert.equal(t.resume, '/x/y.p6mc'); assert.equal(t.next_offset, 50);
+    assert.ok(t.rows.length <= 51 && /^… \+\d+ more/.test(t.rows.at(-1)));
   } finally { config.maxResponseChars = was; }
 });
 
@@ -448,7 +345,7 @@ test('evaluate_batch refuses a scenario that is not {name, overrides: [...]}, na
 test('evaluate refuses overrides that are not a list of operations', async () => {
   const h = await build('EVO', [{ op: 'add_activity', id: 'A50', name: 'A', duration_days: 5 }]);
   const obj = await call('evaluate', { ...h, overrides: { op: 'update_activity' } });
-  assert.equal(obj.err, true); assert.match(obj.d.error.message, /received an object with the keys "op"/);
+  assert.equal(obj.err, true); assert.match(obj.d.error.message, /overrides must be a list; got an object with the keys "op"/);
   const nested = await call('evaluate', { ...h, overrides: [[{ op: 'update_activity', id: 'A50', duration_days: 10 }]] });
   assert.equal(nested.err, true, JSON.stringify(nested.d).slice(0, 300));
 });

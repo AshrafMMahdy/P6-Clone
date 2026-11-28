@@ -65,7 +65,11 @@ export const config: Config = {
   memFactor: num(process.env.P6CLONE_MEM_FACTOR, 3), // memory per byte of file: a parsed XER takes ~2x, plus undo and schedule work
   busyWaitMs: num(process.env.P6CLONE_BUSY_WAIT_MS, 20000),
   softTimeoutMs: num(process.env.P6CLONE_SOFT_TIMEOUT_MS, 25000),
-  maxResponseChars: num(process.env.P6CLONE_MAX_RESPONSE_CHARS, 400000),
+  // AGREED LIMIT (owner, 2026-11-28): 131,072 characters (128 KiB) — an answer longer than this is cut by structure and kept whole in a
+  // file the answer names (mcp/answerCap.ts) — why: the platform's own long-result rule (its resultCap.ts RESULT_CAP_CHARS), the same in
+  // every engine so that one used without the platform holds the same rule ("Answer Size - Agreed, unify it") — arbitrary by agreement
+  // (the platform's number). No setting changes it (it was P6CLONE_MAX_RESPONSE_CHARS, 400,000).
+  maxResponseChars: 128 * 1024,
   checkpointMs: 0,
   screens: false,
 };

@@ -90,14 +90,14 @@ test('an answer too large to return is written whole to a JSON file whose path t
   const was = config.maxResponseChars;
   try {
     const { handle, owner_key } = await open();
-    config.maxResponseChars = 2000;
+    config.maxResponseChars = 6000;
     const r = await call('find_activities', { handle, limit: 100 });
-    assert.equal(r.d.truncated, true);
-    assert.ok(r.d.saved && existsSync(r.d.saved), JSON.stringify(r.d).slice(0, 300));
-    assert.deepEqual(r.d.written, [r.d.saved]);
-    const whole = JSON.parse(readFileSync(r.d.saved, 'utf8'));
+    const path = r.d.result_truncated?.full_result_path;
+    assert.ok(path && existsSync(path), JSON.stringify(r.d).slice(0, 300));
+    assert.deepEqual(r.d.written, [path]);
+    const whole = JSON.parse(readFileSync(path, 'utf8'));
     assert.equal(whole.activities.length, 100);
-    assert.match(r.d.notes[0], /all of it is in/);
+    assert.match(r.d.result_truncated.note, /The whole answer is saved at /);
     config.maxResponseChars = was;
     await call('close', { handle, owner_key, discard: true });
   } finally { config.maxResponseChars = was; setRoots(READ, WRITE); }
