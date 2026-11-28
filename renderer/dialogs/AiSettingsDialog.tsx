@@ -37,6 +37,8 @@ const SEATS: { id: string; label: string; help: string; chat: boolean }[] = [
   { id: 'reranker', label: 'Reranker', help: 'orders search hits (off unless set)', chat: false },
   { id: 'stt', label: 'Speech to text', help: 'transcribes audio (off unless set)', chat: false },
 ];
+/** An error from the main process in its own words (without Electron's "Error invoking remote method" prefix). */
+export const ipcWords = (e: unknown): string => String((e as Error)?.message ?? e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
 const newId = () => `p${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 
 export function AiSettingsDialog() {
@@ -45,12 +47,14 @@ export function AiSettingsDialog() {
   const [tab, setTab] = useState('general');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
-  useEffect(() => { void window.p6.aiGetModels().then(setM); }, []);
+  // settings that cannot be read are said (the file is kept as it is), never shown as empty
+  const [loadErr, setLoadErr] = useState('');
+  useEffect(() => { void window.p6.aiGetModels().then(setM, (e) => setLoadErr(ipcWords(e))); }, []);
   // the code sandbox the agent's code runs in (picked when the agent starts: WSL's Linux jail, else Pyodide)
   const [sb, setSb] = useState<{ kind: string; wsl?: string; wslSetup?: boolean; error?: string } | null>(null);
   const readSb = () => void window.p6.whiq.sandbox().then((r) => setSb(r.ok ? r.data : null));
   useEffect(readSb, []);
-  if (!m) return <Dialog title="AI Assistant Settings" buttons={<button className="btn" onClick={closeDialog}>Cancel</button>}><p>Loading...</p></Dialog>;
+  if (!m) return <Dialog title="AI Assistant Settings" buttons={<button className="btn" onClick={closeDialog}>Cancel</button>}><p>{loadErr || 'Loading...'}</p></Dialog>;
   const set = (patch: Partial<PublicModels>) => setM({ ...m, ...patch });
   const setProv = (i: number, patch: Partial<PublicProvider>) => set({ providers: m.providers.map((p, j) => (j === i ? { ...p, ...patch } : p)) });
   // a renamed tier keeps its seats (they point at it by name)
@@ -63,7 +67,7 @@ export function AiSettingsDialog() {
   const tierUsed = (n: string) => Object.values(m.seats).includes(n);
   // the free-form fields checked here with the rules the main process applies
   let fieldError = '';
-  for (const p of m.providers) { try { parseExtraHeaders(p.extraHeaders); parseExtraBody(p.extraBody, p.kind === 'anthropic' ? 'anthropic' : 'openai'); } catch (e) { fieldError = `${p.name}: ${(e as Error).message}`; } }
+  for (const p of m.providers) { try { parseExtraHeaders(p.extraHeaders, p.kind); parseExtraBody(p.extraBody, p.kind === 'anthropic' ? 'anthropic' : 'openai'); } catch (e) { fieldError = `${p.name}: ${(e as Error).message}`; } }
   const save = async (close: boolean) => {
     setBusy(true);
     try {
@@ -78,7 +82,7 @@ export function AiSettingsDialog() {
     if (!(await save(false))) return;
     setMsg({ ok: true, text: `Testing ${name}...` });
     const r = await window.p6.aiTestTier(name);
-    setMsg(r.ok ? { ok: true, text: `${name}: connected. The model replied: "${r.reply.trim().slice(0, 80)}"` } : { ok: false, text: `${name}: ${r.error}` });
+    setMsg(r.ok ? { ok: true, text: `${name}: connected. The model replied: "${r.reply.trim()}"` } : { ok: false, text: `${name}: ${r.error}` });
   };
   const addProvider = () => { const id = newId(); set({ providers: [...m.providers, { id, name: `provider ${m.providers.length + 1}`, kind: 'anthropic', baseUrl: PRESETS[0].url, extraHeaders: '', extraBody: '', hasKey: false, keyHint: '' }] }); };
   // the Web search seat unset: the agent's tier, when its provider can search (the same rule as the agent's router config)
@@ -119,6 +123,7 @@ export function AiSettingsDialog() {
                 <tr><td>Which one</td><td><select value={preset.label} onChange={(e) => { const x = PRESETS.find((y) => y.label === e.target.value)!; setProv(i, { kind: x.kind, baseUrl: x.url || p.baseUrl }); }}>{PRESETS.map((x) => <option key={x.label}>{x.label}</option>)}</select>
                   {' '}<select value={p.kind} onChange={(e) => setProv(i, { kind: e.target.value as ModelKind })}><option value="anthropic">Anthropic Messages API</option><option value="openai">OpenAI-compatible</option><option value="gemini">Gemini</option></select></td></tr>
                 <tr><td>Endpoint</td><td><input style={{ width: 420, ...mono }} value={p.baseUrl} placeholder="https://..." onChange={(e) => setProv(i, { baseUrl: e.target.value })} /></td></tr>
+                {p.problem && <tr><td></td><td style={{ color: '#b00' }}>{p.problem}</td></tr>}
                 <tr><td>API key</td><td>{!changing && p.hasKey
                   ? <span><input type="password" readOnly value="••••••••••••" style={{ width: 160 }} /> {p.keyHint} <button className="btn" onClick={() => setKeys({ ...keys, [p.id]: '' })}>Replace</button> <button className="btn" onClick={() => { setKeys({ ...keys, [p.id]: '' }); setProv(i, { hasKey: false }); }}>Remove</button></span>
                   : <input type="password" autoComplete="off" style={{ width: 420 }} value={keys[p.id] ?? ''} placeholder="Paste the key (leave empty for a local server)" onChange={(e) => setKeys({ ...keys, [p.id]: e.target.value })} />}</td></tr>

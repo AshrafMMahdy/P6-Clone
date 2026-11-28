@@ -1,4 +1,4 @@
-// AI assistant: provider settings and chat calls, in the main process so the API key never reaches the window.
+// AI assistant: provider settings (the platform agent's seats) and a tier's Test call, in the main process so the API key never reaches the window.
 // The key is encrypted with the operating system's protection (Electron safeStorage: DPAPI on Windows).
 // Providers: Anthropic (Messages API) and anything OpenAI-compatible (OpenAI, OpenRouter, LM Studio, Ollama, ...).
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
@@ -15,23 +15,9 @@ export interface AiConfig {
 /** What the window may see: everything but the key. */
 export interface AiPublicConfig extends AiConfig { hasKey: boolean; keyHint: string; encrypted: boolean }
 
-import type { ToolDef } from '../core/query/tools.ts';
-export type { ToolDef };
-export interface ToolCall { id: string; name: string; args: Record<string, unknown> }
-/** Provider-neutral chat message. */
-export type ChatMsg =
-  | { role: 'user'; content: string }
-  | { role: 'assistant'; content: string; toolCalls?: ToolCall[]; /** the reply's own reasoning, with its model: Anthropic's whole reply (thinking in place), or an OpenAI-compatible host's reasoning field */ raw?: AnthropicTurn | ReasoningTurn }
-  | { role: 'tool'; toolCallId: string; name: string; content: string };
-export interface ChatRequest { system: string; messages: ChatMsg[]; tools: ToolDef[] }
-/** An Anthropic reply that held thinking blocks, kept whole (thinking, text and tool_use in their order) with the model
- *  that wrote it: it goes back unchanged, to that model, while the stored text and tool calls are still that reply. */
-export interface AnthropicTurn { model: string; content: unknown[] }
-/** An OpenAI-compatible reply's reasoning in the field the host sent it in (DeepSeek, Kimi, MiniMax, GLM, Qwen:
- *  reasoning_content), with the model that wrote it: it goes back on that model's own turns, which these hosts require
- *  (DeepSeek answers 400 when an assistant turn of a tool conversation comes back without it). */
-export interface ReasoningTurn { model: string; field: 'reasoning_content' | 'reasoning'; value: string }
-export interface ChatReply { content: string; toolCalls: ToolCall[]; stop: string; raw?: AnthropicTurn | ReasoningTurn }
+/** One question to a provider (a tier's Test button: the only direct model call left in the app; the assistant is the platform's agent). */
+export interface ChatRequest { system: string; messages: { role: 'user'; content: string }[] }
+export interface ChatReply { content: string; stop: string }
 
 export interface KeyBox { available(): boolean; encrypt(s: string): string; decrypt(s: string): string }
 
@@ -41,7 +27,7 @@ export const DEFAULTS: AiConfig = { enabled: false, provider: 'anthropic', baseU
 // own key (encrypted with the OS, under a stable id, so a rename keeps it); an ordered list of tiers, strongest first (the
 // agent's ladder for handovers and Researchers); seats pointing at tiers (an unset chat seat sits on the agent's tier).
 export type ModelKind = 'anthropic' | 'openai' | 'gemini';
-export interface PublicProvider { id: string; name: string; kind: ModelKind; baseUrl: string; extraHeaders: string; extraBody: string; hasKey: boolean; keyHint: string }
+export interface PublicProvider { id: string; name: string; kind: ModelKind; baseUrl: string; extraHeaders: string; extraBody: string; hasKey: boolean; keyHint: string; /** a saved key or header that cannot be decrypted here, in words */ problem?: string }
 export interface TierDef { name: string; provider: string; model: string; /** JSON object of request parameters (optional) */ params?: string }
 export interface PublicModels { enabled: boolean; actions: boolean; providers: PublicProvider[]; tiers: TierDef[]; seats: Record<string, string>; encrypted: boolean }
 interface StoredProvider { id: string; name: string; kind: ModelKind; baseUrl: string; key?: string; keyEnc?: boolean; keyHint?: string; headersEnc?: string; extraBody?: string }
@@ -50,6 +36,7 @@ interface Stored {
   /** the single-provider settings of earlier versions, read once into providers / tiers */
   provider?: string; baseUrl?: string; model?: string; key?: string; keyEnc?: boolean; keyHint?: string; headersEnc?: string; extraHeaders?: string; extraBody?: string;
 }
+// AGREED LIMIT (owner, 2026-11-28): each kind's public endpoint when a provider gives none — why: item 26 rule 4, "Defaults - agreed" — necessary because they are the providers' own addresses.
 export const KIND_BASE: Record<ModelKind, string> = { anthropic: 'https://api.anthropic.com', openai: 'https://api.openai.com/v1', gemini: 'https://generativelanguage.googleapis.com' };
 
 export class AiStore {
@@ -57,7 +44,8 @@ export class AiStore {
   constructor(file: string, box: KeyBox) { this.file = file; this.box = box; }
   private read(): Stored {
     let raw: Partial<Stored> = {};
-    if (existsSync(this.file)) { try { raw = JSON.parse(readFileSync(this.file, 'utf8')); } catch { raw = {}; } }
+    // an unreadable file is refused, never read as empty: a save would otherwise overwrite it and every provider, key and tier would be gone (item 26, rule 1)
+    if (existsSync(this.file)) { try { raw = JSON.parse(readFileSync(this.file, 'utf8')); } catch (e) { throw new Error(`The AI settings in ${this.file} cannot be read (${(e as Error).message}). The file was left as it is: correct it or move it away, then open Edit > AI Assistant Settings again.`); } }
     const s: Stored = { enabled: !!raw.enabled, actions: raw.actions, providers: raw.providers ?? [], tiers: raw.tiers ?? [], seats: raw.seats ?? {} };
     if (!raw.providers && (raw.provider || raw.key || raw.model)) {
       // settings of an earlier version: its one provider becomes "main", its model the first tier
@@ -68,9 +56,14 @@ export class AiStore {
     return s;
   }
   private write(s: Stored): void { writeFileSync(this.file, JSON.stringify({ enabled: s.enabled, actions: s.actions, providers: s.providers, tiers: s.tiers, seats: s.seats }, null, 1)); }
+  /** A saved secret in clear; one that cannot be decrypted here (another computer or Windows user, a changed profile) is refused in words, never read as empty. */
   private secret(p: StoredProvider, v: string | undefined): string {
     if (!v) return '';
-    try { return p.keyEnc === false ? v : this.box.decrypt(v); } catch { return ''; }
+    try { return p.keyEnc === false ? v : this.box.decrypt(v); } catch (e) { throw new Error(`The saved key or headers of provider "${p.name}" cannot be decrypted on this computer or for this Windows user (${(e as Error).message}): enter them again in Edit > AI Assistant Settings.`); }
+  }
+  /** The words of a provider's secret that cannot be decrypted, for the settings dialog (which still opens to let it be entered again). */
+  private problem(p: StoredProvider): string | undefined {
+    try { this.secret(p, p.key); this.secret(p, p.headersEnc); return undefined; } catch (e) { return (e as Error).message; }
   }
   private seal(v: string): { value: string; enc: boolean } { const enc = this.box.available(); return { value: enc ? this.box.encrypt(v) : v, enc }; }
   /** The main agent's tier and its provider (the seat "agent", else the first tier). */
@@ -83,7 +76,7 @@ export class AiStore {
     const s = this.read();
     return {
       enabled: s.enabled, actions: s.actions !== false, tiers: s.tiers, seats: s.seats, encrypted: this.box.available(),
-      providers: s.providers.map((p) => ({ id: p.id, name: p.name, kind: p.kind, baseUrl: p.baseUrl, extraHeaders: this.secret(p, p.headersEnc), extraBody: p.extraBody ?? '', hasKey: !!p.key, keyHint: p.keyHint ?? '' })),
+      providers: s.providers.map((p) => ({ id: p.id, name: p.name, kind: p.kind, baseUrl: p.baseUrl, ...(this.problem(p) ? { extraHeaders: '', problem: this.problem(p) } : { extraHeaders: this.secret(p, p.headersEnc) }), extraBody: p.extraBody ?? '', hasKey: !!p.key, keyHint: p.keyHint ?? '' })),
     };
   }
   /** Saves the whole setup. keys: per provider id, a new key ('' removes it; left out keeps the saved one). Refused, nothing
@@ -96,7 +89,7 @@ export class AiStore {
       if (!n) throw new Error('A provider needs a name.');
       if (names.has(n.toLowerCase())) throw new Error(`Two providers are named "${n}".`);
       names.add(n.toLowerCase());
-      parseExtraHeaders(p.extraHeaders); parseExtraBody(p.extraBody, p.kind === 'anthropic' ? 'anthropic' : 'openai');
+      parseExtraHeaders(p.extraHeaders, p.kind); parseExtraBody(p.extraBody, p.kind === 'anthropic' ? 'anthropic' : 'openai');
     }
     const ids = new Set(m.providers.map((p) => p.id)), tnames = new Set<string>();
     for (const t of m.tiers) {
@@ -136,7 +129,7 @@ export class AiStore {
     if (!s.tiers.length) throw new Error('Set a provider and a model in AI Assistant Settings first.');
     const body = new Map(s.providers.map((p) => [p.id, parseExtraBody(p.extraBody, p.kind === 'anthropic' ? 'anthropic' : 'openai')]));
     return {
-      providers: s.providers.map((p) => ({ name: p.id, type: p.kind === 'anthropic' ? 'anthropic' as const : p.kind === 'gemini' ? 'gemini' as const : 'openai-compat' as const, baseUrl: p.baseUrl || KIND_BASE[p.kind], key: this.secret(p, p.key), headers: p.kind === 'anthropic' ? anthropicHeaders(parseExtraHeaders(this.secret(p, p.headersEnc))) : parseExtraHeaders(this.secret(p, p.headersEnc)) })),
+      providers: s.providers.map((p) => ({ name: p.id, type: p.kind === 'anthropic' ? 'anthropic' as const : p.kind === 'gemini' ? 'gemini' as const : 'openai-compat' as const, baseUrl: p.baseUrl || KIND_BASE[p.kind], key: this.secret(p, p.key), headers: parseExtraHeaders(this.secret(p, p.headersEnc), p.kind) })),
       tiers: s.tiers.map((t) => {
         const params = { ...body.get(t.provider), ...(t.params ? JSON.parse(t.params) as Record<string, unknown> : {}) };
         return { name: t.name, provider: t.provider, model: t.model, ...(Object.keys(params).length ? { params } : {}) };
@@ -145,9 +138,7 @@ export class AiStore {
     };
   }
 
-  // ---- the main agent's provider and model, for the panel's own loop (a build without the platform agent)
-  /** the kind of the agent seat's provider (the panel's own loop cannot speak Gemini's format) */
-  agentKind(): ModelKind | undefined { return this.agent(this.read()).p?.kind; }
+  // ---- the main agent's provider and model (the simple setup of the settings dialog)
   publicConfig(): AiPublicConfig {
     const s = this.read(), { tier, p } = this.agent(s);
     return {
@@ -185,12 +176,10 @@ export class AiStore {
 
 /** The Claude API version the assistant names. 2026-10-21 removed temperature / top_p / top_k (a 400 on every model). */
 export const ANTHROPIC_API_VERSION = '2026-10-21';
-/** The beta that carries thinking.block_binding. */
-const THINKING_BINDING_BETA = 'thinking-binding-controls-2026-08-01';
 /** Anthropic requires max_tokens: the model's own output limit (models.dev), else what this model's refusal named
- *  earlier (remembered for the process), else the known-safe 32768 that every current Claude model takes. Never a fixed
- *  smaller number: a long tool call (a WBS area of schedule operations) must not be cut. The user's extra body still
- *  overrides it. */
+ *  earlier (remembered for the process), else the known-safe 32768 that every current Claude model takes. The user's
+ *  extra body still overrides it. */
+// AGREED LIMIT (owner, 2026-11-28): 32,768 — max_tokens for an Anthropic model models.dev does not list — why: item 26 rule 6, "Necessary limits - agreed" — necessary because Anthropic requires max_tokens; 32,768 arbitrary by agreement (every current Claude model takes it).
 export const ANTHROPIC_FALLBACK_OUTPUT = 32768;
 const learnedOutput = new Map<string, number>();
 export function anthropicMaxTokens(model: string): number {
@@ -198,22 +187,13 @@ export function anthropicMaxTokens(model: string): number {
 }
 /** A refusal of the asked max_tokens ("max_tokens: 64000 > 32000, which is the maximum allowed…"): the number to ask
  *  instead, when the host named one below what was asked. */
+// AGREED LIMIT (owner, 2026-11-28): 1,024 tokens at least — the smallest output limit a refusal can name for the retry — why: item 26 rule 6, "Necessary limits - agreed" — arbitrary by agreement.
 export function outputLimitFromRefusal(text: string, asked: number): number | null {
   if (!/max_tokens|maximum (?:allowed )?(?:number of )?(?:output )?tokens/i.test(text)) return null;
   const nums = (text.match(/\d{4,7}/g) ?? []).map(Number).filter((n) => n >= 1024 && n < asked);
   return nums.length ? Math.max(...nums) : null;
 }
 const trimSlash = (u: string) => u.replace(/\/+$/, '');
-
-/** An Anthropic provider's extra headers: a key not scoped to a workspace needs "anthropic-workspace-id", and the obvious
- *  spellings of it ("workspace", "Workspace-Id", ...) are taken as that header (the panel's loop and the agent's router alike). */
-export function anthropicHeaders(headers: Record<string, string>): Record<string, string> {
-  const out = { ...headers };
-  for (const n of Object.keys(out)) {
-    if (/^(anthropic)?workspace(id)?$/.test(n.toLowerCase().replace(/[^a-z]/g, '')) && n !== 'anthropic-workspace-id') { out['anthropic-workspace-id'] = out[n]; delete out[n]; }
-  }
-  return out;
-}
 
 /** Build the HTTP request for a provider, with the user's extra headers and parameters (pure, so it can be tested). */
 export function buildRequest(cfg: AiConfig, key: string, req: ChatRequest): { url: string; headers: Record<string, string>; body: unknown } {
@@ -223,116 +203,37 @@ export function buildRequest(cfg: AiConfig, key: string, req: ChatRequest): { ur
   // Settings saved before API version 2026-10-21 can still carry a sampling parameter, which that version refuses on every
   // request; the dialog shows why when it is opened (parseExtraBody with the provider).
   if (cfg.provider === 'anthropic') for (const k of ANTHROPIC_REMOVED_BODY) delete extra[k];
-  const headers = cfg.provider === 'anthropic' ? anthropicHeaders(parseExtraHeaders(cfg.extraHeaders)) : parseExtraHeaders(cfg.extraHeaders);
-  const merged: Record<string, string> = { ...r.headers };
-  for (const [name, value] of Object.entries(headers)) {
-    // the user's own anthropic-beta joins the one the request needs (any spelling of the name), never replaces it
-    const own = name.toLowerCase() === 'anthropic-beta' ? Object.keys(merged).find((n) => n.toLowerCase() === 'anthropic-beta') : undefined;
-    if (own) { merged[own] = [merged[own], value].filter(Boolean).join(','); continue; }
-    merged[name] = value;
-  }
-  const body: Record<string, unknown> = { ...(r.body as object), ...extra };
-  // a user's own thinking setting keeps the binding the handed-back blocks need
-  const binding = (r.body as { thinking?: { block_binding?: unknown } }).thinking?.block_binding;
-  if (binding && extra.thinking && typeof extra.thinking === 'object') body.thinking = { ...(extra.thinking as object), block_binding: binding };
-  return { url: r.url, headers: merged, body };
+  const headers = parseExtraHeaders(cfg.extraHeaders, cfg.provider);
+  return { url: r.url, headers: { ...r.headers, ...headers }, body: { ...(r.body as object), ...extra } };
 }
-
-/** The kept reply when it is still this message for this model (same text, same tool calls in order), else null. */
-function keptTurn(m: ChatMsg, model: string): unknown[] | null {
-  if (m.role !== 'assistant' || !m.raw || m.raw.model !== model || !('content' in m.raw) || !Array.isArray(m.raw.content)) return null;
-  const blocks = m.raw.content as Array<{ type?: string; text?: string; id?: string }>;
-  const text = blocks.filter((b) => b.type === 'text').map((b) => b.text ?? '').join('\n');
-  const ids = blocks.filter((b) => b.type === 'tool_use').map((b) => String(b.id));
-  const calls = (m.toolCalls ?? []).map((c) => c.id);
-  return text === m.content && ids.length === calls.length && ids.every((id, i) => id === calls[i]) ? m.raw.content : null;
-}
-
-/** The host of a URL, or '' when it is not one. */
-function hostOf(url: string): string { try { return new URL(url).hostname; } catch { return ''; } }
 
 function baseRequest(cfg: AiConfig, key: string, req: ChatRequest): { url: string; headers: Record<string, string>; body: unknown } {
   if (cfg.provider === 'anthropic') {
     const base = trimSlash(cfg.baseUrl || 'https://api.anthropic.com');
-    const messages: unknown[] = [];
-    for (const m of req.messages) {
-      if (m.role === 'user') messages.push({ role: 'user', content: m.content });
-      // the reply as the model wrote it, thinking in place, while it is still that reply for this model; else without thinking
-      else if (m.role === 'assistant') messages.push({ role: 'assistant', content: keptTurn(m, cfg.model) ?? [...(m.content ? [{ type: 'text', text: m.content }] : []), ...(m.toolCalls ?? []).map((t) => ({ type: 'tool_use', id: t.id, name: t.name, input: t.args }))] });
-      else {
-        // consecutive tool results go into one user message
-        const prev = messages[messages.length - 1] as { role: string; content: unknown[] } | undefined;
-        const block = { type: 'tool_result', tool_use_id: m.toolCallId, content: m.content };
-        if (prev && prev.role === 'user' && Array.isArray(prev.content) && (prev.content[0] as { type?: string })?.type === 'tool_result') prev.content.push(block);
-        else messages.push({ role: 'user', content: [block] });
-      }
-    }
-    // Thinking blocks going back are bound to the context before them on Fable 5.1, Opus 5.5, Sonnet 5.5 and Haiku 5.5, and
-    // the conversation is shortened as it grows (renderer/ai/context.ts): "drop_block" drops a block whose context changed
-    // instead of failing the request. Models without the check accept it.
-    const sendsThinking = req.messages.some((m) => m.role === 'assistant' && keptTurn(m, cfg.model) !== null);
     return {
       url: `${base}${/\/v1$/.test(base) ? '' : '/v1'}/messages`,
-      headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': ANTHROPIC_API_VERSION, ...(sendsThinking ? { 'anthropic-beta': THINKING_BINDING_BETA } : {}) },
-      body: { model: cfg.model, max_tokens: anthropicMaxTokens(cfg.model), system: req.system, messages, tools: req.tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.parameters })),
-        ...(sendsThinking ? { thinking: { type: 'adaptive', block_binding: { prefix_mismatch_behavior: 'drop_block' } } } : {}) },
+      headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': ANTHROPIC_API_VERSION },
+      body: { model: cfg.model, max_tokens: anthropicMaxTokens(cfg.model), system: req.system, messages: req.messages },
     };
   }
   const base = trimSlash(cfg.baseUrl || 'https://api.openai.com/v1');
-  // The reasoning_content family takes its reasoning back on its own turns; DeepSeek and Kimi refuse a tool conversation's
-  // assistant turn without the field. Other hosts get nothing back (some return a field they refuse as input: Groq).
-  const host = hostOf(base);
-  const echoesReasoning = /(^|\.)(deepseek\.com|moonshot\.(ai|cn)|kimi\.(ai|com)|z\.ai|bigmodel\.cn|aliyuncs\.com)$/i.test(host);
-  const needsReasoningField = /(^|\.)(deepseek\.com|moonshot\.(ai|cn)|kimi\.(ai|com))$/i.test(host);
-  const messages: unknown[] = [{ role: 'system', content: req.system }];
-  for (const m of req.messages) {
-    if (m.role === 'user') messages.push({ role: 'user', content: m.content });
-    else if (m.role === 'assistant') {
-      // The model's own reasoning back on these hosts; DeepSeek and Kimi also need the field (empty) on a turn another
-      // model wrote once tools are in the conversation.
-      const own = echoesReasoning && m.raw && 'field' in m.raw && m.raw.model === cfg.model ? { reasoning_content: m.raw.value } : needsReasoningField && req.tools.length ? { reasoning_content: '' } : {};
-      messages.push({ role: 'assistant', content: m.content || null, ...own, ...(m.toolCalls?.length ? { tool_calls: m.toolCalls.map((t) => ({ id: t.id, type: 'function', function: { name: t.name, arguments: JSON.stringify(t.args) } })) } : {}) });
-    }
-    else messages.push({ role: 'tool', tool_call_id: m.toolCallId, content: m.content });
-  }
   const headers: Record<string, string> = { 'content-type': 'application/json' };
   if (key) headers.authorization = `Bearer ${key}`;
   if (/openrouter\.ai/.test(base)) { headers['HTTP-Referer'] = 'https://localhost/p6-clone'; headers['X-Title'] = 'P6 Clone'; }
-  return {
-    url: `${base}/chat/completions`,
-    headers,
-    body: { model: cfg.model, messages, ...(req.tools.length ? { tools: req.tools.map((t) => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.parameters } })) } : {}) },
-  };
+  return { url: `${base}/chat/completions`, headers, body: { model: cfg.model, messages: [{ role: 'system', content: req.system }, ...req.messages] } };
 }
 
 /** Turn a provider response into a ChatReply (pure). */
 export function parseReply(cfg: AiConfig, json: any): ChatReply {
   if (cfg.provider === 'anthropic') {
     const blocks: any[] = Array.isArray(json?.content) ? json.content : [];
-    return {
-      content: blocks.filter((b) => b.type === 'text').map((b) => b.text).join('\n'),
-      toolCalls: blocks.filter((b) => b.type === 'tool_use').map((b) => ({ id: String(b.id), name: String(b.name), args: b.input ?? {} })),
-      stop: String(json?.stop_reason ?? ''),
-      ...(blocks.some((b) => b.type === 'thinking' || b.type === 'redacted_thinking') ? { raw: { model: cfg.model, content: blocks } } : {}),
-    };
+    return { content: blocks.filter((b) => b.type === 'text').map((b) => b.text).join('\n'), stop: String(json?.stop_reason ?? '') };
   }
   const m = json?.choices?.[0]?.message ?? {};
-  const calls: any[] = Array.isArray(m.tool_calls) ? m.tool_calls : [];
-  return {
-    content: typeof m.content === 'string' ? m.content : Array.isArray(m.content) ? m.content.map((p: any) => p.text ?? '').join('') : '',
-    toolCalls: calls.map((c, i) => { let args: Record<string, unknown> = {}; try { args = JSON.parse(c.function?.arguments || '{}'); } catch { /* model sent bad JSON */ } return { id: String(c.id ?? `call_${i}`), name: String(c.function?.name ?? ''), args }; }),
-    stop: String(json?.choices?.[0]?.finish_reason ?? ''),
-    ...(typeof m.reasoning_content === 'string' && m.reasoning_content ? { raw: { model: cfg.model, field: 'reasoning_content' as const, value: m.reasoning_content } }
-      : typeof m.reasoning === 'string' && m.reasoning ? { raw: { model: cfg.model, field: 'reasoning' as const, value: m.reasoning } } : {}),
-  };
+  return { content: typeof m.content === 'string' ? m.content : Array.isArray(m.content) ? m.content.map((p: any) => p.text ?? '').join('') : '', stop: String(json?.choices?.[0]?.finish_reason ?? '') };
 }
 
-export async function chat(store: AiStore, req: ChatRequest, signal?: AbortSignal): Promise<ChatReply> {
-  if (store.agentKind() === 'gemini') throw new Error('A Gemini model runs through the Scheduler Agent only (the panel\'s own loop speaks the Anthropic and OpenAI formats).');
-  return chatWith(store.config(), store.key(), req, signal);
-}
-
-/** One request to a provider and model (the panel's own loop; a tier's Test button). */
+/** One request to a provider and model (a tier's Test button). */
 export async function chatWith(cfg: AiConfig, key: string, req: ChatRequest, signal?: AbortSignal): Promise<ChatReply> {
   if (!cfg.model) throw new Error('No model is set. Open Edit > AI Assistant Settings and enter a model name.');
   if (!key && cfg.provider === 'anthropic') throw new Error('No API key is saved. Open Edit > AI Assistant Settings.');
@@ -341,7 +242,7 @@ export async function chatWith(cfg: AiConfig, key: string, req: ChatRequest, sig
   try {
     res = await fetch(r.url, { method: 'POST', headers: r.headers, body: JSON.stringify(r.body), signal });
   } catch (e) {
-    if ((e as Error).name === 'AbortError') throw e;
+    if ((e as Error).name === 'AbortError' || (e as Error).name === 'TimeoutError') throw e;
     throw new Error(`Could not reach ${r.url}: ${(e as Error).message}. Check the provider URL (a local server must be running).`);
   }
   const text = await res.text();
@@ -352,7 +253,8 @@ export async function chatWith(cfg: AiConfig, key: string, req: ChatRequest, sig
     const asked = Number((r.body as { max_tokens?: unknown }).max_tokens);
     const lower = cfg.provider === 'anthropic' && res.status === 400 ? outputLimitFromRefusal(text, asked) : null;
     if (lower) { learnedOutput.set(cfg.model, lower); return chatWith(cfg, key, req, signal); }
-    const msg = json?.error?.message ?? json?.error ?? json?.message ?? text.slice(0, 300);
+    // the provider's own words, whole (a body that is not JSON is the words)
+    const msg = json?.error?.message ?? json?.error ?? json?.message ?? text;
     throw new Error(`The provider answered ${res.status}: ${typeof msg === 'string' ? msg : JSON.stringify(msg)}`);
   }
   if (!json) throw new Error('The provider did not return JSON.');

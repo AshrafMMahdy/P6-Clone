@@ -63,12 +63,6 @@ const api = {
   aiGetConfig: (): Promise<AiPublicConfig> => ipcRenderer.invoke('ai:getConfig'),
   menuTree: (): Promise<{ label: string; id?: string; accelerator?: string; submenu?: unknown[] }[]> => ipcRenderer.invoke('menu:tree'),
   aiSetConfig: (c: AiConfig, apiKey?: string): Promise<AiPublicConfig> => ipcRenderer.invoke('ai:setConfig', c, apiKey),
-  aiChat: (id: string, req: ChatRequest): Promise<{ ok: true; reply: ChatReply } | { ok: false; error: string }> => ipcRenderer.invoke('ai:chat', id, req),
-  aiCancel: (id: string): Promise<boolean> => ipcRenderer.invoke('ai:cancel', id),
-  aiChatLoad: (key: string): Promise<unknown[]> => ipcRenderer.invoke('ai:chatLoad', key),
-  aiChatAppend: (key: string, entries: unknown[]): Promise<void> => ipcRenderer.invoke('ai:chatAppend', key, entries),
-  aiChatClear: (key: string): Promise<void> => ipcRenderer.invoke('ai:chatClear', key),
-  aiChatMove: (from: string, to: string): Promise<void> => ipcRenderer.invoke('ai:chatMove', from, to),
   onAiConfig: (cb: (c: AiPublicConfig) => void) => { ipcRenderer.on('ai:config', (_e, c: AiPublicConfig) => cb(c)); },
   /** Providers, tiers and seats: read (keys never), save (new keys by provider id), test a saved tier. */
   aiGetModels: (): Promise<PublicModels> => ipcRenderer.invoke('ai:getModels'),
@@ -76,6 +70,7 @@ const api = {
   aiTestTier: (name: string): Promise<{ ok: true; reply: string } | { ok: false; error: string }> => ipcRenderer.invoke('ai:testTier', name),
   /** The open schedule's MCP server for the embedded agent (main/live-mcp.ts): a request to list or run a tool, and the answer. */
   onLiveCall: (cb: (id: number, kind: 'list' | 'call', payload: unknown) => void) => { const f = (_e: unknown, id: number, kind: 'list' | 'call', payload: unknown) => cb(id, kind, payload); ipcRenderer.on('live:call', f); return () => { ipcRenderer.off('live:call', f); }; },
+  onLiveCancel: (cb: (id: number) => void) => { const f = (_e: unknown, id: number) => cb(id); ipcRenderer.on('live:cancel', f); return () => { ipcRenderer.off('live:cancel', f); }; },
   liveReply: (id: number, v: { ok: boolean; result?: unknown; error?: string }) => ipcRenderer.send('live:reply', id, v),
   /** The embedded platform agent (main/whiq-ipc.ts): every call answers {ok, data} or {ok: false, error}. */
   whiq: {

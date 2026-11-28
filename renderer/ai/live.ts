@@ -21,14 +21,6 @@ export async function initLive(runMenu: (id: string) => void): Promise<void> {
   run = runMenu;
   try { menuTree = (await window.p6.menuTree()) as MenuNode[]; } catch { menuTree = []; }
 }
-/** The menu bar as text, for the assistant's instructions ("Tools > Schedule... (F9)"). */
-export function menuGuide(): string {
-  const out: string[] = [];
-  const walk = (ns: MenuNode[], path: string[]) => { for (const n of ns) { const p = [...path, n.label]; if (n.submenu?.length) walk(n.submenu, p); else out.push(`${p.join(' > ')}${n.accelerator ? ` (${n.accelerator})` : ''}`); } };
-  walk(menuTree, []);
-  return out.join('\n');
-}
-
 export const LIVE_TOOLS: ToolDef[] = [
   { name: 'ui_menu', description: 'Choose a menu command on screen, exactly as the user would (the menu opens visibly and the item is clicked). path like "Tools > Schedule..." or "View > Zoom > Zoom In". Use the menu list in your instructions.', parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] } },
   { name: 'ui_click', description: 'Click a visible button or tab by its text or tooltip (dialog buttons such as "Schedule" or "OK", toolbar buttons such as "Zoom In", window buttons on the left such as "Activities", detail tabs such as "Relationships"). The cursor moves there on screen.', parameters: { type: 'object', properties: { target: { type: 'string' } }, required: ['target'] } },
@@ -134,14 +126,15 @@ function screen(): unknown {
       title: d.querySelector('.dialog-title span')?.textContent,
       buttons: [...d.querySelectorAll('button')].filter(visible).map((b) => b.textContent?.trim()).filter(Boolean),
       tabs: [...d.querySelectorAll('.tab')].map((b) => b.textContent?.trim()),
-      fields: [...d.querySelectorAll('label, tr')].filter((l) => l.querySelector('input, select')).slice(0, 30).map((l) => ({ label: norm(l.textContent).slice(0, 60), value: (l.querySelector('input, select') as HTMLInputElement).type === 'checkbox' ? (l.querySelector('input') as HTMLInputElement).checked : (l.querySelector('input, select') as HTMLInputElement).value })),
+      fields: [...d.querySelectorAll('label, tr')].filter((l) => l.querySelector('input, select')).map((l) => ({ label: norm(l.textContent), value: (l.querySelector('input, select') as HTMLInputElement).type === 'checkbox' ? (l.querySelector('input') as HTMLInputElement).checked : (l.querySelector('input, select') as HTMLInputElement).value })),
     } : null,
     toolbar: [...document.querySelectorAll<HTMLElement>('.toolbar .tbtn, .tbar .tbtn')].map((b) => b.title).filter(Boolean),
   };
 }
 
 /** Run one live tool. Returns what the model should know. */
-export async function runLive(name: string, args: Record<string, any>): Promise<unknown> {
+/** `givenUp`: true once the main process gave the call up (no answer in time): nothing is changed after that (item 26). */
+export async function runLive(name: string, args: Record<string, any>, givenUp: () => boolean = () => false): Promise<unknown> {
   try {
     switch (name) {
       case 'ui_screen': return screen();
@@ -150,10 +143,13 @@ export async function runLive(name: string, args: Record<string, any>): Promise<
         let items = menuTree, node: MenuNode | undefined;
         for (const p of path) { node = items.find((m) => norm(m.label) === norm(p)) ?? items.find((m) => norm(m.label).startsWith(norm(p))); if (!node) return { error: `No menu item "${p}" in ${path.join(' > ')}.` }; items = node.submenu ?? []; }
         if (!node?.id) return { error: `"${path.join(' > ')}" is a submenu, not a command.` };
-        await showMenu(path.map((p, i) => { let it = menuTree; for (let k = 0; k < i; k++) it = it.find((m) => norm(m.label).startsWith(norm(path[k])))?.submenu ?? []; return it.find((m) => norm(m.label) === norm(p) || norm(m.label).startsWith(norm(p)))?.label ?? p; }));
+        const chosen = path.map((p, i) => { let it = menuTree; for (let k = 0; k < i; k++) it = it.find((m) => norm(m.label) === norm(path[k]) || norm(m.label).startsWith(norm(path[k])))?.submenu ?? []; return it.find((m) => norm(m.label) === norm(p))?.label ?? it.find((m) => norm(m.label).startsWith(norm(p)))?.label ?? p; });
+        await showMenu(chosen);
         run(node.id);
         await sleep(400);
-        return { done: path.join(' > '), screen: screen() };
+        // a part matched by its start is said: the answer names what was chosen (item 26, rule 1)
+        const guessed = chosen.some((c, i) => norm(c) !== norm(path[i]));
+        return { done: chosen.join(' > '), ...(guessed ? { note: `"${path.join(' > ')}" is not an exact menu path; "${chosen.join(' > ')}" was chosen (the first item starting with each part).` } : {}), screen: screen() };
       }
       case 'ui_click': {
         const el = findClickable(String(args.target ?? ''));
@@ -161,7 +157,9 @@ export async function runLive(name: string, args: Record<string, any>): Promise<
         if ((el as HTMLButtonElement).disabled) return { error: `"${args.target}" is disabled right now.`, screen: screen() };
         await clickEl(el);
         await sleep(300);
-        return { clicked: args.target, screen: screen() };
+        // what was clicked, by its own text; one matched by its start is said (item 26, rule 1)
+        const name = (el.textContent ?? '').trim() || el.title, exact = norm(el.textContent) === norm(String(args.target ?? '')) || norm(el.title) === norm(String(args.target ?? ''));
+        return { clicked: name, ...(exact ? {} : { note: `Nothing is called "${args.target}" exactly; "${name}", the first whose text starts with it, was clicked.` }), screen: screen() };
       }
       case 'ui_type': {
         const el = findField(String(args.field ?? ''));
@@ -171,7 +169,11 @@ export async function runLive(name: string, args: Record<string, any>): Promise<
         const setter = Object.getOwnPropertyDescriptor(el instanceof HTMLSelectElement ? HTMLSelectElement.prototype : HTMLInputElement.prototype, 'value')!.set!;
         if (el instanceof HTMLSelectElement || el.type === 'date' || el.type === 'datetime-local' || el.type === 'checkbox') {
           if (el instanceof HTMLInputElement && el.type === 'checkbox') { if (String(el.checked) !== text) el.click(); }
-          else { const v = el instanceof HTMLSelectElement ? ([...el.options].find((o) => norm(o.text) === norm(text) || o.value === text)?.value ?? text) : text; setter.call(el, v); el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); }
+          else {
+            // a dropdown takes one of its options: another text is refused with the options (item 26, rule 1)
+            const opt = el instanceof HTMLSelectElement ? [...el.options].find((o) => norm(o.text) === norm(text) || o.value === text) : undefined;
+            if (el instanceof HTMLSelectElement && !opt) return { error: `"${args.field}" has no option "${text}"; its options: ${[...el.options].map((o) => `"${o.text.trim()}"`).join(', ')}.`, screen: screen() };
+            const v = opt ? opt.value : text; setter.call(el, v); el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); }
         } else {
           setter.call(el, ''); el.dispatchEvent(new Event('input', { bubbles: true }));
           for (let i = 1; i <= text.length; i++) { setter.call(el, text.slice(0, i)); el.dispatchEvent(new Event('input', { bubbles: true })); await sleep(28); }
@@ -179,8 +181,12 @@ export async function runLive(name: string, args: Record<string, any>): Promise<
         return { typed: text, into: args.field };
       }
       case 'select_activity': {
-        const t = rows(getDb(), 'TASK').find((x) => x.task_code === String(args.activity_id) && getUi().openProjects.includes(x.proj_id)) ?? rows(getDb(), 'TASK').find((x) => x.task_code === String(args.activity_id));
-        if (!t) return { error: `No activity "${args.activity_id}".` };
+        // an activity of a project that is not open is refused, naming where it is (item 26, rule 1: it was selected in a closed project)
+        const t = rows(getDb(), 'TASK').find((x) => x.task_code === String(args.activity_id) && getUi().openProjects.includes(x.proj_id));
+        if (!t) {
+          const elsewhere = rows(getDb(), 'TASK').filter((x) => x.task_code === String(args.activity_id)).map((x) => rows(getDb(), 'PROJECT').find((p) => p.proj_id === x.proj_id)?.proj_short_name).filter(Boolean);
+          return { error: elsewhere.length ? `Activity "${args.activity_id}" is not in the open project(s); it is in ${elsewhere.join(', ')}: open that project first.` : `No activity "${args.activity_id}" in the open project(s).` };
+        }
         const btn = [...document.querySelectorAll<HTMLElement>('.dirbtn')].find((b) => norm(b.textContent) === 'activities');
         if (getUi().view !== 'activities' && btn) await clickEl(btn);
         setUi({ view: 'activities', selTasks: [t.task_id], selTask: t.task_id, revealTask: t.task_id });
@@ -190,7 +196,8 @@ export async function runLive(name: string, args: Record<string, any>): Promise<
         return { selected: `${t.task_code} ${t.task_name}` };
       }
       case 'edit_project': {
-        const ops = Array.isArray(args.operations) ? args.operations : [];
+        if (!Array.isArray(args.operations)) return { error: 'operations must be a list of edit operations ([{op: ...}, ...]); nothing was changed.' };
+        const ops = args.operations;
         const dels = ops.filter((o: { op?: string }) => o?.op === 'delete_activity' || o?.op === 'dissolve_activity' || o?.op === 'delete_wbs' || o?.op === 'delete_relationship' || o?.op === 'delete_resource' || o?.op === 'delete_code_value');
         const projId = getUi().openProjects[0];
         let proj = projId ? rows(getDb(), 'PROJECT').find((p) => p.proj_id === projId)?.proj_short_name : undefined;
@@ -198,7 +205,9 @@ export async function runLive(name: string, args: Record<string, any>): Promise<
         const ownWork = !!proj && aiCreated.has(proj.toLowerCase()) && ops.every((o: Record<string, unknown>) => o?.project == null || String(o.project).toLowerCase() === proj!.toLowerCase());
         const mk = ops.findIndex((o: Record<string, unknown>) => o?.op === 'add_project' || o?.op === 'copy_project');
         const inNew = mk >= 0 && dels.every((o: Record<string, unknown>) => ops.indexOf(o) > mk && o.project == null);
-        if (dels.length && !ownWork && !inNew && !(await window.p6.confirm(`The AI assistant wants to make ${ops.length} change(s), including ${dels.length} deletion(s).`, ops.map((o: Record<string, unknown>) => `${o.op} ${o.id ?? `${o.pred ?? ''} ${o.succ ?? ''}`}`).join('\n').slice(0, 800) + '\n\nAllow? (You can undo with Ctrl+Z.)'))) return { error: 'The user declined.' };
+        if (dels.length && !ownWork && !inNew && !(await window.p6.confirm(`The AI assistant wants to make ${ops.length} change(s), including ${dels.length} deletion(s).`, [...dels.map((o: Record<string, unknown>) => `${o.op} ${o.id ?? `${o.pred ?? ''} ${o.succ ?? ''}`}`), ...(ops.length > dels.length ? [`and ${ops.length - dels.length} other change(s)`] : [])].join('\n') + '\n\nAllow? (You can undo with Ctrl+Z.)'))) return { error: 'The user declined.' };
+        // the agent was told the call failed while the user was deciding: nothing is changed now (item 26: a given-up call does not land later)
+        if (givenUp()) return { error: 'This call was given up before the user answered (no answer in time): nothing was changed.' };
         // operations need not name the project: the open one, or the one this batch creates (from its add_project on)
         const withProj = ops.map((o: Record<string, unknown>) => {
           if ((o?.op === 'add_project' || o?.op === 'copy_project') && typeof o.id === 'string') { proj = o.id.trim(); return o; }

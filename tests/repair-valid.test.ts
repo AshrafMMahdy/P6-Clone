@@ -99,8 +99,14 @@ test('save repair on CCA R03 (a corrupted 16,000-activity file): the repaired co
   const o = await call('open_file', { path: src, lenient: true });
   assert.equal(o.still_rejected, true);
   const out = join(dir, 'cca-repaired.xer');
-  const r = await call('save', { handle: o.handle, repair: true, path: out });
-  assert.deepEqual([r.check.still_rejected, r.check.counts.fatal ?? 0, r.check.counts.error ?? 0], [false, 0, 0], JSON.stringify(r.check).slice(0, 2000));
+  const cut = await call('save', { handle: o.handle, repair: true, path: out });
+  assert.deepEqual([cut.check.still_rejected, cut.check.counts.fatal ?? 0, cut.check.counts.error ?? 0], [false, 0, 0], JSON.stringify(cut.check).slice(0, 2000));
+  // the list rule (item 26): the answer lists the first 25 changes, changes_total says how many, the file holds the whole answer
+  assert.equal(cut.changes.length, 25);
+  assert.ok(cut.changes_total > 25);
+  assert.match(cut.changes_note, /^25 of \d+ shown; all \d+ in .+save-result-.+\.json\.$/);
+  const r = JSON.parse(readFileSync(/ in (.+\.json)\.$/.exec(cut.changes_note)![1], 'utf8'));
+  assert.equal(r.changes.length, cut.changes_total);
   // the 49,445-day duration: from its remaining duration (not started)
   assert.ok(r.changes.some((c: any) => c.field === 'target_drtn_hr_cnt' && c.old === '395563.6' && c.new === '336'));
   // the actual starts after the 2011-09-30 data date: P6 imports them, so they stay as recorded, reported as invalid dates

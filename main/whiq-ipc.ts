@@ -17,6 +17,7 @@ import type { AgentModels } from './whiq-config.ts';
 import type { AiStore } from './ai.ts';
 
 /** A file name Windows accepts: no path or reserved characters, no device name (CON, NUL, COM1, ...), no trailing dot or space. */
+// AGREED LIMIT (owner, 2026-11-28): the fallback name ("Project", "attachment", "project.xer") when a name cleans to nothing — why: item 26 rule 6, "Necessary limits - agreed" — necessary because Windows needs a file name.
 export function safeName(name: string, fallback: string): string {
   let n = name.replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').replace(/[. ]+$/, '');
   if (/^(con|prn|aux|nul|com[0-9]|lpt[0-9])(\.|$)/i.test(n)) n = `_${n}`;
@@ -30,6 +31,7 @@ export function freeName(dir: string, name: string): string {
   return n;
 }
 /** Documents a file chip opens with their program; anything else (a script, a program) is shown in its folder instead. */
+// AGREED LIMIT (owner, 2026-11-28): the file kinds a chip opens; any other is shown in its folder instead — why: item 26 rule 6, "Necessary limits - agreed" — necessary because opening any file the agent names would run programs (security).
 const OPENABLE = /\.(docx?|xlsx?|xlsm|csv|pptx?|pdf|md|txt|json|xml|xer|mpp|png|jpe?g|gif|svg|webp|dwg|dxf|html?)$/i;
 
 /** The models the agent runs on: the providers, tiers and seats of the AI settings. */
@@ -122,7 +124,8 @@ export function registerWhiq(getWin: () => BrowserWindow | null, ai: () => AiSto
     const fresh = list.filter((f) => copied.get(`${chatId}|${f.path}`) !== `${f.mtime}|${f.sizeBytes}`);
     if (!fresh.length) return;
     let wd = await folderOf(chatId);
-    if (!wd && !declined.has(chatId)) { wd = await askFolder(chatId, 'where should its files go?'); if (!wd) declined.add(chatId); }
+    // a "no" is not asked again for this chat, and it is said once: the files stay with the agent until a folder is chosen (the folder button)
+    if (!wd && !declined.has(chatId)) { wd = await askFolder(chatId, 'where should its files go?'); if (!wd) { declined.add(chatId); send(chatId, { type: 'error', message: 'The agent made files, but this chat has no working folder (none was chosen), so they were not copied: choose one with the folder button and they are copied then.' }); } }
     if (!wd) return;
     for (const f of fresh) {
       // the agent's own relative path, kept inside the folder (no "..", no drive or root)
@@ -140,7 +143,7 @@ export function registerWhiq(getWin: () => BrowserWindow | null, ai: () => AiSto
   const handle = (ch: string, fn: (...a: any[]) => Promise<unknown>) =>
     ipcMain.handle(ch, async (_e, ...a) => { try { return { ok: true, data: await fn(...a) }; } catch (err) { return { ok: false, error: (err as Error).message }; } });
 
-  // P6CLONE_WHIQ=off: the panel keeps its own loop (tests of that fallback; a build without the agent behaves the same)
+  // P6CLONE_WHIQ=off turns the agent off; the panel then says it is not available and why (as for a build without the agent)
   // the panel opened: start the agent now, so its engines have listed their tools by the first message
   handle('whiq:warm', async () => { void host.start().catch(() => { /* reported on use */ }); return true; });
   handle('whiq:status', async () => ({ ...host.status, missing: process.env.P6CLONE_WHIQ === 'off' ? 'Turned off (P6CLONE_WHIQ=off).' : host.available() }));
@@ -162,7 +165,7 @@ export function registerWhiq(getWin: () => BrowserWindow | null, ai: () => AiSto
   handle('whiq:mcpStatus', () => host.api('GET', '/api/mcp/servers'));
   handle('whiq:files', (chatId: string) => host.api('GET', `/api/files?chatId=${encodeURIComponent(chatId)}`));
   /** The user picks the chat's working folder (where its files go and what it may read). Null when cancelled. */
-  handle('whiq:chooseFolder', async (chatId: string) => { const p = await askFolder(chatId, 'its files go here, and it may read what is in it'); return p || null; });
+  handle('whiq:chooseFolder', async (chatId: string) => { const p = await askFolder(chatId, 'its files go here, and it may read what is in it'); if (p) { declined.delete(chatId); void syncFiles(chatId); } return p || null; });
   /** Files the user attaches: copied into the working folder's 00_INPUTS (a folder is asked for first when there is none). */
   handle('whiq:attach', async (chatId: string) => {
     let wd = await folderOf(chatId);

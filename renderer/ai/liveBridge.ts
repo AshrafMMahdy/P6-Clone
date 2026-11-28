@@ -30,7 +30,10 @@ export function initLiveBridge(): () => void {
   const all = [...TOOLS, ...LIVE_TOOLS, ...AGENT_TOOLS];
   // "Let it operate the app" (AI settings), read at every list and call: off, the on-screen tools are neither offered nor run
   const operates = async () => (await window.p6.aiGetModels()).actions !== false;
-  return window.p6.onLiveCall(async (id, kind, payload) => {
+  // calls the main process gave up on (no answer in time): their work is not made (runLive checks before it changes anything)
+  const given = new Set<number>();
+  const offCancel = window.p6.onLiveCancel((id) => { given.add(id); });
+  const offCall = window.p6.onLiveCall(async (id, kind, payload) => {
     try {
       if (kind === 'list') return window.p6.liveReply(id, { ok: true, result: (await operates()) ? all : all.filter((t) => !LIVE_TOOLS.includes(t)) });
       const { name, args } = payload as { name: string; args: Record<string, any> };
@@ -38,7 +41,7 @@ export function initLiveBridge(): () => void {
       if (LIVE_TOOLS.some((t) => t.name === name) && !(await operates())) return window.p6.liveReply(id, { ok: true, result: { error: 'Operating the app is turned off (Edit > AI Assistant Settings: "Let it operate the app"). Answer from the read-only tools, or ask the user to turn it on.' } });
       const ui = getUi();
       const result = name === 'export_project' ? await exportProject(args ?? {})
-        : LIVE_TOOLS.some((t) => t.name === name) ? await runLive(name, args ?? {}) : runTool(name, args ?? {}, getDb(), makeCtx(getDb(), ui.prefs), ui.openProjects, ui.prefs.hoursPerDay);
+        : LIVE_TOOLS.some((t) => t.name === name) ? await runLive(name, args ?? {}, () => given.has(id)) : runTool(name, args ?? {}, getDb(), makeCtx(getDb(), ui.prefs), ui.openProjects, ui.prefs.hoursPerDay);
       // (the file's base currency, where an answer gives costs: as the MCP server's answers name it)
       const named = result && typeof result === 'object' && !Array.isArray(result) && !(result as { error?: unknown }).error && namesCurrency(name, args ?? {}) ? withCurrency(getDb(), result as Record<string, unknown>) : result;
       window.p6.liveReply(id, { ok: true, result: named });
@@ -46,4 +49,5 @@ export function initLiveBridge(): () => void {
       window.p6.liveReply(id, { ok: false, error: (e as Error).message });
     }
   });
+  return () => { offCall(); offCancel(); };
 }

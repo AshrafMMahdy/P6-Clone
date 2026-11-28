@@ -1,7 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, safeStorage } from 'electron';
-import { AiStore, chat, chatWith, type AiConfig, type ChatRequest, type PublicModels } from './ai.ts';
+import { AiStore, chatWith, type AiConfig, type PublicModels } from './ai.ts';
 import { initModelsDev } from './modelsDev.ts';
-import { appendChat, clearChat, loadChat, moveChat } from './ai-chats.ts';
 import { closeSync, copyFileSync, existsSync, mkdtempSync, openSync, readSync, writeSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
@@ -31,6 +30,7 @@ if (userData) app.setPath('userData', userData);
 // automation) still run side by side.
 // ponytail: keyed on userData, not on the data root; two installs in different folders share AppData and so count as
 // one copy. Key on dataRoot() with an own lock file if two installs must ever run together.
+// AGREED LIMIT (owner, 2026-11-28): one running copy per data folder (a second start hands over to the first) — why: item 26 rule 6, "Necessary limits - agreed" — necessary because two copies would overwrite each other's database.
 if (!app.requestSingleInstanceLock()) app.exit(0);
 app.on('second-instance', () => {
   if (!win || background) return;   // a background run (tests) never takes the front of the screen
@@ -41,6 +41,7 @@ app.on('second-instance', () => {
 for (const m of moveLegacyData()) console.log(`[data] moved ${m} into ${dataRoot()}`);
 if (dataNote) console.log(`[data] ${dataNote}`);
 // Large programmes (100 MB XERs, 100k+ activities) are held in the window's memory: allow it more than V8's default.
+// AGREED LIMIT (owner, 2026-11-28): 12 GB — the window's heap; past it the window stops and says so ("The window stopped …") — why: item 26 rule 5, "Timers, memory, and safety - agreed" — necessary to raise V8's default; 12 GB arbitrary by agreement.
 app.commandLine.appendSwitch('js-flags', '--max-old-space-size=12288');
 // Background mode: started by a test or another program (a remote-debugging port, which Playwright always passes and a
 // person never does), with --background, or P6CLONE_BACKGROUND=1. The windows open minimized and never take the front
@@ -187,7 +188,6 @@ const ai = () => (aiStore ??= new AiStore(dataFile('Settings', 'ai-assistant.jso
   encrypt: (s) => safeStorage.encryptString(s).toString('base64'),
   decrypt: (s) => safeStorage.decryptString(Buffer.from(s, 'base64')),
 }));
-const aiCalls = new Map<string, AbortController>();
 ipcMain.handle('ai:getConfig', () => ai().publicConfig());
 // the embedded platform agent; new AI settings take effect on its next start
 const whiq = registerWhiq(() => win, ai);
@@ -202,23 +202,11 @@ ipcMain.handle('ai:saveModels', (_e, m: PublicModels, keys: Record<string, strin
 ipcMain.handle('ai:testTier', async (_e, name: string) => {
   try {
     const { cfg, key } = ai().tierRequest(name);
-    const r = await chatWith(cfg, key, { system: 'Answer in one short sentence.', messages: [{ role: 'user', content: 'Say: ready.' }], tools: [] }, AbortSignal.timeout(60_000));
-    return { ok: true, reply: r.content.slice(0, 200) };
-  } catch (e) { return { ok: false, error: (e as Error).message }; }
+    // AGREED LIMIT (owner, 2026-11-28): 60 s — a tier's Test is given up after this long, and says so — why: item 26 rule 5, "Timers, memory, and safety - agreed" — arbitrary by agreement (a test button).
+    const r = await chatWith(cfg, key, { system: 'Answer in one short sentence.', messages: [{ role: 'user', content: 'Say: ready.' }] }, AbortSignal.timeout(60_000));
+    return { ok: true, reply: r.content };
+  } catch (e) { return { ok: false, error: (e as Error).name === 'TimeoutError' ? 'The provider did not answer within 60 s.' : (e as Error).message }; }
 });
-ipcMain.handle('ai:chat', async (_e, id: string, req: ChatRequest) => {
-  const ctl = new AbortController();
-  aiCalls.set(id, ctl);
-  try { return { ok: true, reply: await chat(ai(), req, ctl.signal) }; }
-  catch (e) { return { ok: false, error: (e as Error).name === 'AbortError' ? 'Stopped.' : (e as Error).message }; }
-  finally { aiCalls.delete(id); }
-});
-ipcMain.handle('ai:cancel', (_e, id: string) => { aiCalls.get(id)?.abort(); return true; });
-const chatDir = () => dataDir('Agent', 'panel-chats');
-ipcMain.handle('ai:chatLoad', (_e, key: string) => loadChat(chatDir(), key));
-ipcMain.handle('ai:chatAppend', (_e, key: string, entries: unknown[]) => appendChat(chatDir(), key, entries));
-ipcMain.handle('ai:chatClear', (_e, key: string) => clearChat(chatDir(), key));
-ipcMain.handle('ai:chatMove', (_e, from: string, to: string) => moveChat(chatDir(), from, to));
 
 // the menu bar as data (labels, command ids, shortcuts): the AI assistant uses it to explain and to operate menus
 export interface MenuNode { label: string; id?: string; accelerator?: string; submenu?: MenuNode[] }

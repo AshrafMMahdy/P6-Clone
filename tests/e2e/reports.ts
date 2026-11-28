@@ -1,7 +1,8 @@
 // End-to-end: Tools > Reports (standard reports, Report Wizard, Run Report outputs), the Earned Value layout, and
-// the AI assistant creating a report on screen and reading one (fake provider).  node tests/e2e/reports.ts
+// the embedded platform agent creating a report on screen and reading one (a scripted stand-in model).  node tests/e2e/reports.ts
+// (needs vendor/whiq-agent: the assistant is the platform's agent)
 import { _electron as electron } from 'playwright';
-import { createServer } from 'node:http';
+import { fakeModel } from './fake-model.ts';
 import { mkdtempSync, readFileSync, rmSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -12,7 +13,7 @@ const pages = (f: string) => (readFileSync(f).toString('latin1').match(/\/Type\s
 const root = join(import.meta.dirname, '..', '..');
 const profile = mkdtempSync(join(tmpdir(), 'p6rep-'));
 const out = mkdtempSync(join(tmpdir(), 'p6rep-out-'));
-const app = await electron.launch({ env: { ...process.env, P6CLONE_WHIQ: 'off' } as Record<string, string>, args: [root, '--user-data', profile, '--import', join(root, 'Sample XERs/cairo festival city.xer')], cwd: root });
+const app = await electron.launch({ args: [root, '--user-data', profile, '--import', join(root, 'Sample XERs/cairo festival city.xer')], cwd: root });
 const win = await app.firstWindow(); const errors: string[] = []; win.on('pageerror', (e) => errors.push(e.message));
 await win.waitForSelector('button:has-text("View Diagnostics...")'); await win.click('button:has-text("Next >")'); await win.click('button:has-text("Finish")'); await win.waitForSelector('.grid-row');
 for (let i = 0; i < 4 && (await win.locator('.dialog').count()); i++) { await win.keyboard.press('Escape'); await win.waitForTimeout(150); }
@@ -73,24 +74,28 @@ await win.waitForTimeout(400);
 const heads = await win.locator('.grid-header').innerText();
 ok(/Budget at Completion/.test(heads) && /Earned Value Cost/.test(heads) && /Cost Performance Index/.test(heads), 'the Earned Value Layout shows the earned value columns: ' + heads.replace(/s+/g, ' ').slice(0, 160));
 
-// 5. the AI assistant makes a report on screen and reads one
+// 5. the agent makes a report on screen and reads one
 const steps = [
   { name: 'create_report', args: { name: 'AI Float Watch', subject: 'activities', columns: ['task_code', 'task_name', 'finish', 'total_float'], filter: 'open', group_by: 'none', sort_by: 'total_float' } },
   { name: 'open_report', args: { report: 'Critical Activities' } },
   { name: 'run_report_dialog', args: { report: 'Critical Activities', output: 'excel' } },
 ];
+// the steps through the embedded platform agent (a scripted stand-in model, fake-model.ts): its live tools are the app's (item 26: the panel has no loop of its own)
 const results: any[] = [];
-const srv = createServer((req, res) => { let b = ''; req.on('data', (d) => (b += d)); req.on('end', () => {
-  const j = JSON.parse(b); const tools = j.messages.filter((m: any) => m.role === 'tool'); if (tools.length) results.push(JSON.parse(tools[tools.length - 1].content));
-  const i = tools.length;
-  const message = i < steps.length ? { role: 'assistant', content: null, tool_calls: [{ id: `c${i}`, type: 'function', function: { name: steps[i].name, arguments: JSON.stringify(steps[i].args) } }] } : { role: 'assistant', content: 'Done: the report is saved and the Excel export is ready for you to save.' };
-  res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ choices: [{ message }] }));
-}); }).listen(0);
-await win.evaluate(async (port) => { await (window as any).p6.aiSetConfig({ enabled: true, provider: 'openai', baseUrl: `http://127.0.0.1:${port}/v1`, model: 'fake', actions: true }); }, (srv.address() as any).port);
+const fake = await fakeModel((r) => {
+  if (!(r.tools ?? []).some((t) => t.function.name === 'load_tools')) return { text: 'ok' };
+  const done = r.messages.filter((m) => m.role === 'tool').map((m) => (typeof m.content === 'string' ? m.content : JSON.stringify(m.content)));
+  results.length = 0; for (const d of done.slice(1)) { try { results.push(JSON.parse(d)); } catch { results.push({ text: d }); } }
+  if (done.length === 0) return { call: 'load_tools', args: { names: ['mcp__p6clone_live__*'] } };
+  const i = done.length - 1;
+  return i < steps.length ? { call: `mcp__p6clone_live__${steps[i].name}`, args: steps[i].args } : { text: 'Report made.' };
+});
+await win.evaluate((u) => (window as any).p6.aiSetConfig({ enabled: true, provider: 'openai', baseUrl: u, model: 'fake-1', actions: true }, 'not-a-key'), fake.url);
 await win.waitForSelector('.ai-strip'); await win.waitForTimeout(400); if (!(await win.locator('.ai-panel').count())) await win.click('.ai-strip');
+await win.waitForSelector('.ai-head b:has-text("Scheduler Agent")', { timeout: 15000 });
 await win.fill('.ai-panel textarea', 'Make me a float report and show me the critical activities'); await win.keyboard.press('Enter');
 const seen = new Set<string>();
-for (let i = 0; i < 240 && !(await win.locator('.ai-msg.ai').count()); i++) {
+for (let i = 0; i < 3000 && !(await win.locator('.ai-panel .ai-msg:has-text("Report made.")').count()); i++) {
   const t = await win.locator('.dialog-title').allInnerTexts(); for (const x of t) seen.add(x);
   await win.waitForTimeout(100);
 }
@@ -100,5 +105,5 @@ ok(results[1]?.total_rows === 46 && results[1]?.rows?.[0]?.['Activity ID'], 'ope
 ok((await win.locator('.report-page h2').innerText()) === 'Critical Activities', 'open_report showed the report on screen');
 ok(await win.locator('.dialog-title:has-text("Run Report")').count() === 1 && await win.locator('.dialog label:has-text("Excel Workbook") input').isChecked(), 'run_report_dialog opened Run Report with Excel chosen, for the user to press OK');
 ok(!errors.length, 'no page errors ' + errors.join(' | '));
-await app.close(); srv.close();
+await app.close(); fake.close();
 rmSync(profile, { recursive: true, force: true }); rmSync(out, { recursive: true, force: true });

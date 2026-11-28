@@ -1,7 +1,8 @@
-// End-to-end: Page Setup, Print Preview of the whole schedule, Save as PDF, Excel export and import, and the AI
-// assistant preparing a printout (native save/open/confirm dialogs are answered by the test).  node tests/e2e/print.ts
+// End-to-end: Page Setup, Print Preview of the whole schedule, Save as PDF, Excel export and import, and the embedded
+// platform agent preparing a printout (native save/open/confirm dialogs are answered by the test).  node tests/e2e/print.ts
+// (needs vendor/whiq-agent: the assistant is the platform's agent)
 import { _electron as electron } from 'playwright';
-import { createServer } from 'node:http';
+import { fakeModel } from './fake-model.ts';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -13,7 +14,7 @@ const pages = (f: string) =>(readFileSync(f).toString('latin1').match(/\/Type\s*
 const root = join(import.meta.dirname, '..', '..');
 const profile = mkdtempSync(join(tmpdir(), 'p6print-'));
 const out = mkdtempSync(join(tmpdir(), 'p6print-out-'));
-const app = await electron.launch({ env: { ...process.env, P6CLONE_WHIQ: 'off' } as Record<string, string>, args: [root, '--user-data', profile, '--import', join(root, 'Sample XERs/cairo festival city.xer')], cwd: root });
+const app = await electron.launch({ args: [root, '--user-data', profile, '--import', join(root, 'Sample XERs/cairo festival city.xer')], cwd: root });
 const win = await app.firstWindow(); const errors: string[] = []; win.on('pageerror', (e) => errors.push(e.message));
 await win.waitForSelector('button:has-text("View Diagnostics...")'); await win.click('button:has-text("Next >")'); await win.click('button:has-text("Finish")'); await win.waitForSelector('.grid-row');
 for (let i = 0; i < 4 && (await win.locator('.dialog').count()); i++) { await win.keyboard.press('Escape'); await win.waitForTimeout(150); }
@@ -81,26 +82,30 @@ if (existsSync(xlsx)) {
   ok(!(await win.locator('.grid-row', { hasText: 'Mobilization (from Excel)' }).count()), 'Ctrl+Z undoes the import');
 }
 
-// 5. the AI assistant prepares a printout (fake provider) and opens the preview
+// 5. the agent prepares a printout and opens the preview
 const steps = [
   { name: 'set_print_options', args: { settings: { content: 'table', columns: ['task_code', 'task_name', 'start', 'finish'], paper: 'A4', landscape: true, footer: { right: 'Sheet [Page]/[Pages]' } } } },
   { name: 'ui_menu', args: { path: 'File > Print Preview' } },
 ];
+// the steps through the embedded platform agent (a scripted stand-in model, fake-model.ts): its live tools are the app's (item 26: the panel has no loop of its own)
 const results: any[] = [];
-const srv = createServer((req, res) => { let b = ''; req.on('data', (d) => (b += d)); req.on('end', () => {
-  const j = JSON.parse(b); const tools = j.messages.filter((m: any) => m.role === 'tool'); if (tools.length) results.push(JSON.parse(tools[tools.length - 1].content));
-  const i = tools.length;
-  const message = i < steps.length ? { role: 'assistant', content: null, tool_calls: [{ id: `c${i}`, type: 'function', function: { name: steps[i].name, arguments: JSON.stringify(steps[i].args) } }] } : { role: 'assistant', content: 'Your printout is ready in the preview.' };
-  res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ choices: [{ message }] }));
-}); }).listen(0);
-await win.evaluate(async (port) => { await (window as any).p6.aiSetConfig({ enabled: true, provider: 'openai', baseUrl: `http://127.0.0.1:${port}/v1`, model: 'fake', actions: true }); }, (srv.address() as any).port);
+const fake = await fakeModel((r) => {
+  if (!(r.tools ?? []).some((t) => t.function.name === 'load_tools')) return { text: 'ok' };
+  const done = r.messages.filter((m) => m.role === 'tool').map((m) => (typeof m.content === 'string' ? m.content : JSON.stringify(m.content)));
+  results.length = 0; for (const d of done.slice(1)) { try { results.push(JSON.parse(d)); } catch { results.push({ text: d }); } }
+  if (done.length === 0) return { call: 'load_tools', args: { names: ['mcp__p6clone_live__*'] } };
+  const i = done.length - 1;
+  return i < steps.length ? { call: `mcp__p6clone_live__${steps[i].name}`, args: steps[i].args } : { text: 'Printout prepared.' };
+});
+await win.evaluate((u) => (window as any).p6.aiSetConfig({ enabled: true, provider: 'openai', baseUrl: u, model: 'fake-1', actions: true }, 'not-a-key'), fake.url);
 await win.waitForSelector('.ai-strip'); await win.waitForTimeout(400); if (!(await win.locator('.ai-panel').count())) await win.click('.ai-strip');
+await win.waitForSelector('.ai-head b:has-text("Scheduler Agent")', { timeout: 15000 });
 await win.fill('.ai-panel textarea', 'Print just the activity list on A4'); await win.keyboard.press('Enter');
-for (let i = 0; i < 120 && !(await win.locator('.ai-msg.ai').count()); i++) await win.waitForTimeout(250);
+await win.waitForSelector('.ai-panel .ai-msg:has-text("Printout prepared.")', { timeout: 300000 }).catch(() => {});
 ok(results[0]?.settings?.content === 'table' && results[0]?.pages >= 1 && results[0]?.printable_columns?.includes('total_float'), 'set_print_options applied the settings and reported pages: ' + JSON.stringify({ c: results[0]?.settings?.content, p: results[0]?.pages }));
 const pv2 = await previewPdf();
 ok(!!pv2, 'the assistant opened Print Preview for the user');
 await closePreviews();
 ok(!errors.length, 'no page errors ' + errors.join(' | '));
-await app.close(); srv.close();
+await app.close(); fake.close();
 rmSync(profile, { recursive: true, force: true }); rmSync(out, { recursive: true, force: true });

@@ -91,7 +91,7 @@ export function runMenu(id: string): void {
     case 'edit.preferences': return openDialog('prefs');
     case 'edit.selectAll': return void handleEditKey(new KeyboardEvent('keydown', { key: 'a', ctrlKey: true }));
     case 'edit.aiSettings': return openDialog('aiSettings');
-    case 'view.ai': return void window.p6.aiGetConfig().then((c) => (c.enabled ? setUi((u) => ({ aiOpen: !u.aiOpen })) : openDialog('aiSettings')));
+    case 'view.ai': return void window.p6.aiGetConfig().then((c) => (c.enabled ? setUi((u) => ({ aiOpen: !u.aiOpen })) : openDialog('aiSettings')), () => openDialog('aiSettings')); // (unreadable settings: the dialog says why)
     case 'edit.find': return ui.openProjects.length ? openDialog('find') : toast('Open a project first.');
     case 'view.columns': return openDialog('columns');
     case 'view.filters': return openDialog('filters');

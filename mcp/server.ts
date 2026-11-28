@@ -399,7 +399,9 @@ function cutListed<T>(answer: T, keys: readonly string[]): T {
     if (!v || typeof v !== 'object') return v;
     const out: Record<string, unknown> = {};
     for (const [k, x] of Object.entries(v as Record<string, unknown>)) {
-      if (Array.isArray(x) && keys.includes(k) && x.length > LISTED && !(`${k}_total` in (v as object))) { out[k] = x.slice(0, LISTED).map(walk); out[`${k}_total`] = x.length; }
+      // a list already cut has a _total above its length and is left as it is; one whose _total is its own length is cut now
+      const total = (v as Record<string, unknown>)[`${k}_total`];
+      if (Array.isArray(x) && keys.includes(k) && x.length > LISTED && (total == null || total === x.length)) { out[k] = x.slice(0, LISTED).map(walk); out[`${k}_total`] = x.length; }
       else out[k] = walk(x);
     }
     return out;
@@ -1068,7 +1070,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
         const still = worst(g) === 'fatal' || g.some((x) => x.code === 'EMPTY_KEY');
         const dateField = (f: string) => /_date$/.test(f), clearedDates = repairs.changes.some((c) => dateField(c.field) && c.new === ''), clearedActual = repairs.changes.some((c) => (c.field === 'act_start_date' || c.field === 'act_end_date') && c.new === '');
         // the repairs by the list rule (item 26, rule 3): the first 25 changes and invalid dates, their totals, the whole answer in a file
-        return listedAnswer('save', { saved: path, format: label, repaired: true, changes: repairs.changes.map((c) => ({ table: c.table, row: c.row, key: c.key, field: c.field, old: c.old, new: c.new, reason: c.reason })),
+        return listedAnswer('save', { saved: path, format: label, repaired: true, changes: repairs.changes.map((c) => ({ table: c.table, row: c.row, key: c.key, field: c.field, old: c.old, new: c.new, reason: c.reason })), changes_total: repairs.changes.length,
           // kept as the customer recorded them (P6 imports them), reported as DCMA's invalid dates
           invalid_dates: repairs.findings, check: { ...brief(g), still_rejected: still },
           notes: [...notes, still ? `Repaired copy written, but P6 would still refuse it: ${namesText(g.filter((x) => x.severity === 'fatal' && x.omitted == null).map((x) => withoutAdvice(x.message).replace(/\.$/, '')))}.` : (repairs.changes.length ? `Repaired copy written: ${plural(repairs.changes.length, 'repair')} (changes lists them)` : 'Copy written: the file needed no repair') + `${clearedActual ? `; ${plural(repairs.changes.filter((c) => (c.field === 'act_start_date' || c.field === 'act_end_date') && c.new === '').length, 'actual date')} cleared: run schedule` : ''}.`] }, ['changes', 'invalid_dates']);

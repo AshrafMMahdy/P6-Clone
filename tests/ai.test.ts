@@ -4,37 +4,28 @@ import { mkdtempSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { buildRequest, parseReply, AiStore, type ChatRequest } from '../main/ai.ts';
-import { runTool, TOOLS } from '../core/query/tools.ts';
+import { runTool } from '../core/query/tools.ts';
 import { parseXer } from '../core/xer/parse.ts';
 import { makeCtx } from '../renderer/model.ts';
 import { realSamples } from './helpers.ts';
 
-const req: ChatRequest = { system: 'sys', tools: [TOOLS[0]], messages: [
-  { role: 'user', content: 'hi' },
-  { role: 'assistant', content: 'checking', toolCalls: [{ id: 't1', name: 'project_summary', args: {} }, { id: 't2', name: 'critical_path', args: { limit: 3 } }] },
-  { role: 'tool', toolCallId: 't1', name: 'project_summary', content: '{"a":1}' },
-  { role: 'tool', toolCallId: 't2', name: 'critical_path', content: '{"b":2}' },
-] };
+// the one direct model call left in the app: a tier's Test button (the assistant is the platform's agent; item 26 removed the panel's own loop)
+const req: ChatRequest = { system: 'sys', messages: [{ role: 'user', content: 'hi' }] };
 
-test('Anthropic and OpenAI-compatible requests and replies', () => {
+test('Anthropic and OpenAI-compatible requests and replies: one question, the reply\'s text', () => {
   const a = buildRequest({ enabled: true, provider: 'anthropic', baseUrl: 'https://api.anthropic.com/', model: 'm' }, 'k', req) as any;
   assert.equal(a.url, 'https://api.anthropic.com/v1/messages');
   assert.equal(a.headers['x-api-key'], 'k');
+  assert.equal(a.headers['anthropic-version'], '2026-10-21');
   assert.equal(a.body.system, 'sys');
-  assert.equal(a.body.messages.length, 3); // the two tool results share one user message
-  assert.deepEqual(a.body.messages[2].content.map((b: any) => b.tool_use_id), ['t1', 't2']);
-  assert.equal(a.body.tools[0].input_schema.type, 'object');
-  const ar = parseReply({ provider: 'anthropic' } as any, { content: [{ type: 'text', text: 'Hello' }, { type: 'tool_use', id: 'x', name: 'get_activity', input: { activity_id: 'A1' } }], stop_reason: 'tool_use' });
-  assert.deepEqual(ar, { content: 'Hello', toolCalls: [{ id: 'x', name: 'get_activity', args: { activity_id: 'A1' } }], stop: 'tool_use' });
-
+  assert.deepEqual(a.body.messages, [{ role: 'user', content: 'hi' }]);
+  assert.equal('tools' in a.body, false);
+  assert.deepEqual(parseReply({ provider: 'anthropic' } as any, { content: [{ type: 'thinking', thinking: '' }, { type: 'text', text: 'Hello' }], stop_reason: 'end_turn' }), { content: 'Hello', stop: 'end_turn' });
   const o = buildRequest({ enabled: true, provider: 'openai', baseUrl: 'http://localhost:1234/v1', model: 'local' }, '', req) as any;
   assert.equal(o.url, 'http://localhost:1234/v1/chat/completions');
   assert.equal(o.headers.authorization, undefined); // LM Studio needs no key
-  assert.equal(o.body.messages[0].role, 'system');
-  assert.equal(o.body.messages[2].tool_calls[1].function.arguments, '{"limit":3}');
-  assert.equal(o.body.messages[3].role, 'tool');
-  const or = parseReply({ provider: 'openai' } as any, { choices: [{ message: { content: null, tool_calls: [{ id: 'c', function: { name: 'find_activities', arguments: '{"text":"pour"}' } }] }, finish_reason: 'tool_calls' }] });
-  assert.deepEqual(or.toolCalls, [{ id: 'c', name: 'find_activities', args: { text: 'pour' } }]);
+  assert.deepEqual(o.body.messages, [{ role: 'system', content: 'sys' }, { role: 'user', content: 'hi' }]);
+  assert.deepEqual(parseReply({ provider: 'openai' } as any, { choices: [{ message: { content: 'ready.' }, finish_reason: 'stop' }] }), { content: 'ready.', stop: 'stop' });
 });
 
 test('the API key is stored encrypted and never in the public config', () => {
@@ -79,7 +70,7 @@ test('extra headers and request parameters are merged, validated, and headers st
   assert.equal(r.body.max_tokens, 8000); // overrides the default
   const o = buildRequest({ ...cfg, provider: 'openai', baseUrl: 'https://openrouter.ai/api/v1' }, 'k', req) as any;
   assert.equal(o.body.temperature, 0.2); // OpenAI-compatible hosts still take them
-  assert.equal(r.body.messages.length, 3); // the assistant's own fields are kept
+  assert.deepEqual(r.body.messages, req.messages); // the assistant's own fields are kept
   assert.throws(() => buildRequest({ ...cfg, extraBody: '{"messages": []}' }, 'k', req), /cannot set messages/);
   assert.throws(() => buildRequest({ ...cfg, extraBody: '[1]' }, 'k', req), /JSON object/);
   assert.throws(() => buildRequest({ ...cfg, extraHeaders: 'not a header' }, 'k', req), /line 1/);
@@ -97,89 +88,19 @@ test('extra headers and request parameters are merged, validated, and headers st
   assert.doesNotThrow(() => store.save({ ...cfg, provider: 'openai', extraBody: '{"temperature": 0.2}' }));
 });
 
-test('Anthropic requests name API version 2026-10-21 and hand the reply back as written, to its own model', () => {
-  const cfg = { enabled: true, provider: 'anthropic' as const, baseUrl: 'https://api.anthropic.com', model: 'claude-opus-5-5' };
-  const plain = buildRequest(cfg, 'k', req) as any;
-  assert.equal(plain.headers['anthropic-version'], '2026-10-21');
-  assert.equal(plain.body.thinking, undefined); // nothing to hand back: the model's own default
-  assert.equal(plain.headers['anthropic-beta'], undefined);
-  // an interleaved reply: thinking between the tool calls
-  const content = [{ type: 'thinking', thinking: '', signature: 'SIG' }, { type: 'tool_use', id: 't1', name: 'get_activity', input: { activity_id: 'A1' } },
-    { type: 'redacted_thinking', data: 'enc' }, { type: 'text', text: 'And the next.' }, { type: 'tool_use', id: 't2', name: 'get_activity', input: { activity_id: 'A2' } }];
-  const reply = parseReply(cfg, { content, stop_reason: 'tool_use' });
-  assert.deepEqual(reply.raw, { model: 'claude-opus-5-5', content });
-  assert.deepEqual(reply.toolCalls.map((c) => c.id), ['t1', 't2']); // read by type, not position
-  const conv = (over: Partial<{ content: string }> = {}) => ({ system: 's', tools: [], messages: [
-    { role: 'user' as const, content: 'q' },
-    { role: 'assistant' as const, content: over.content ?? reply.content, toolCalls: reply.toolCalls, raw: reply.raw },
-    { role: 'tool' as const, toolCallId: 't1', name: 'get_activity', content: '{}' },
-    { role: 'tool' as const, toolCallId: 't2', name: 'get_activity', content: '{}' },
-  ] });
-  const next = buildRequest(cfg, 'k', conv()) as any;
-  assert.deepEqual(next.body.messages[1].content, content); // exactly as returned, thinking in place
-  assert.deepEqual(next.body.thinking, { type: 'adaptive', block_binding: { prefix_mismatch_behavior: 'drop_block' } });
-  assert.equal(next.headers['anthropic-beta'], 'thinking-binding-controls-2026-08-01');
-  // the user's own beta header joins it (any spelling), and their own thinking setting keeps the binding
-  const own = buildRequest({ ...cfg, extraHeaders: 'Anthropic-Beta: context-1m-2025-08-07', extraBody: '{"thinking": {"type": "adaptive", "display": "summarized"}}' }, 'k', conv()) as any;
-  assert.equal(own.headers['anthropic-beta'], 'thinking-binding-controls-2026-08-01,context-1m-2025-08-07');
-  assert.equal(Object.keys(own.headers).filter((n) => n.toLowerCase() === 'anthropic-beta').length, 1);
-  assert.deepEqual(own.body.thinking, { type: 'adaptive', display: 'summarized', block_binding: { prefix_mismatch_behavior: 'drop_block' } });
-  // another model, or a reply whose text changed, goes without thinking and without the thinking setting
-  const other = buildRequest({ ...cfg, model: 'claude-haiku-4-5' }, 'k', conv()) as any;
-  assert.ok(!other.body.messages[1].content.some((b: any) => b.type === 'thinking' || b.type === 'redacted_thinking'));
-  assert.equal(other.body.thinking, undefined);
-  const edited = buildRequest(cfg, 'k', conv({ content: 'something else' })) as any;
-  assert.ok(!edited.body.messages[1].content.some((b: any) => b.type === 'thinking'));
-  assert.equal(edited.body.thinking, undefined);
-  const none = parseReply(cfg, { content: [{ type: 'text', text: 'hi' }], stop_reason: 'end_turn' });
-  assert.equal(none.raw, undefined);
-});
-
-
-test('the reasoning_content hosts get their reasoning back on their own turns (DeepSeek, Kimi need it); no other host does', () => {
-  const cfg = { enabled: true, provider: 'openai' as const, baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-v4' };
-  const tools = [{ name: 'get_activity', description: 'd', parameters: { type: 'object', properties: {} } }];
-  const reply = parseReply(cfg, { choices: [{ message: { content: '', reasoning_content: 'look it up', tool_calls: [{ id: 'c1', function: { name: 'get_activity', arguments: '{}' } }] }, finish_reason: 'tool_calls' }] });
-  assert.deepEqual(reply.raw, { model: 'deepseek-v4', field: 'reasoning_content', value: 'look it up' });
-  const conv = (raw: typeof reply.raw) => ({ system: 's', tools, messages: [
-    { role: 'user' as const, content: 'q' },
-    { role: 'assistant' as const, content: '', toolCalls: reply.toolCalls, raw },
-    { role: 'tool' as const, toolCallId: 'c1', name: 'get_activity', content: '{}' },
-  ] });
-  const same = buildRequest(cfg, 'k', conv(reply.raw)) as any;
-  assert.equal(same.body.messages[2].reasoning_content, 'look it up');
-  const other = buildRequest({ ...cfg, model: 'deepseek-v4-flash' }, 'k', conv(reply.raw)) as any;
-  assert.equal(other.body.messages[2].reasoning_content, ''); // another model's turn: the field DeepSeek requires, empty
-  const generic = buildRequest({ ...cfg, baseUrl: 'http://127.0.0.1:1234/v1', model: 'deepseek-v4-flash' }, 'k', conv(reply.raw)) as any;
-  assert.ok(!('reasoning_content' in generic.body.messages[2])); // an unknown host gets no reasoning field
-  const local = parseReply({ ...cfg, baseUrl: 'http://127.0.0.1:1234/v1' }, { choices: [{ message: { content: 'hi', reasoning: 'r' } }] });
-  assert.deepEqual(local.raw, { model: 'deepseek-v4', field: 'reasoning', value: 'r' });
-  const groq = buildRequest({ ...cfg, baseUrl: 'https://api.groq.com/openai/v1' }, 'k', conv(local.raw)) as any;
-  assert.ok(!('reasoning' in groq.body.messages[2]) && !('reasoning_content' in groq.body.messages[2])); // never echoed to a host that may refuse it
-  const kimi = buildRequest({ ...cfg, baseUrl: 'https://api.moonshot.ai/v1', model: 'kimi-k3' }, 'k', conv(reply.raw)) as any;
-  assert.equal(kimi.body.messages[2].reasoning_content, ''); // Kimi needs the field too
-  const anth = buildRequest({ enabled: true, provider: 'anthropic', baseUrl: 'https://api.anthropic.com', model: 'deepseek-v4' }, 'k', conv(reply.raw)) as any;
-  assert.ok(Array.isArray(anth.body.messages[1].content) && !anth.body.thinking); // never read as an Anthropic turn
-});
-
-test('extra headers tolerate pasted text: spaces in names, typographic dashes, invisible characters', async () => {
+test('a mistyped extra header is refused in words, never rewritten: a space, a typographic dash, an invisible character, "=" for ":"', async () => {
   const { parseExtraHeaders } = await import('../main/ai-extras.ts');
-  for (const s of ['WORKSPACE ID: wrkspc_01ab', 'WORKSPACE-ID: wrkspc_01ab', 'WORKSPACE‑ID: wrkspc_01ab', 'WORKSPACE–ID : wrkspc_01ab',
-    '​WORKSPACE-ID: wrkspc_01ab', 'WORKSPACE-ID： wrkspc_01ab', 'WORKSPACE ID: wrkspc_01ab', 'WORKSPACE-ID = wrkspc_01ab'])
-    assert.deepEqual(parseExtraHeaders(s), { 'WORKSPACE-ID': 'wrkspc_01ab' }, JSON.stringify(s));
-  assert.deepEqual(parseExtraHeaders('X-A: b=c:d'), { 'X-A': 'b=c:d' });
-  assert.throws(() => parseExtraHeaders('X(A): b'), /contains "\("/);
-  assert.throws(() => parseExtraHeaders('no separator'), /line 1/);
+  for (const [line, why] of [['WORKSPACE ID: w', /contains " ", U\+0020, a space/], ['WORKSPACE\u2011ID: w', /contains "\u2011", U\+2011/], ['\u200bX-A: w', /contains "\u200b", U\+200B/], ['X-A = w', /write it as "Header-Name: value"/], ['X(A): b', /contains "\("/], ['no separator', /line 1/]] as const)
+    assert.throws(() => parseExtraHeaders(line), why, line);
+  assert.deepEqual(parseExtraHeaders('X-A: b=c:d\n# a comment\n'), { 'X-A': 'b=c:d' });
 });
 
-test('Anthropic workspace header is sent as anthropic-workspace-id whatever the user called it', () => {
+test('Anthropic reads its workspace from anthropic-workspace-id only: another spelling is refused with the right name; the right one in any case is sent', () => {
   const base = { enabled: true, provider: 'anthropic' as const, baseUrl: 'https://api.anthropic.com', model: 'm' };
-  for (const name of ['WORKSPACE-ID', 'workspace_id', 'Workspace', 'Anthropic-Workspace-ID', 'anthropic-workspace-id']) {
-    const h = buildRequest({ ...base, extraHeaders: `${name}: wrkspc_01ab` }, 'k', req).headers;
-    assert.equal(h['anthropic-workspace-id'], 'wrkspc_01ab', name);
-    assert.equal(Object.keys(h).filter((k) => /workspace/i.test(k)).length, 1, name);
-  }
-  assert.equal(buildRequest({ ...base, provider: 'openai', extraHeaders: 'WORKSPACE-ID: w' }, 'k', req).headers['WORKSPACE-ID'], 'w');
+  for (const name of ['WORKSPACE-ID', 'workspace_id', 'Workspace'])
+    assert.throws(() => buildRequest({ ...base, extraHeaders: `${name}: wrkspc_01ab` }, 'k', req), new RegExp(`Anthropic does not read "${name}"; its workspace header is anthropic-workspace-id \\(write "anthropic-workspace-id: wrkspc_01ab"\\)`), name);
+  for (const name of ['Anthropic-Workspace-ID', 'anthropic-workspace-id']) assert.equal(buildRequest({ ...base, extraHeaders: `${name}: w` }, 'k', req).headers[name], 'w');
+  assert.equal(buildRequest({ ...base, provider: 'openai', extraHeaders: 'WORKSPACE-ID: w' }, 'k', req).headers['WORKSPACE-ID'], 'w', 'another provider: its own header names');
 });
 
 test("Anthropic max_tokens is the model's own output limit (models.dev), never a fixed smaller number", async () => {

@@ -33,7 +33,7 @@ export function serveMcpHttp(o: { port: number; host: string; token: string | nu
     if (req.method === 'GET') return json(res, 405, { error: 'This server answers POST requests only (no server-sent stream).' }, { allow: 'POST, DELETE' });
     if (req.method !== 'POST') return json(res, 405, { error: 'Use POST.' }, { allow: 'POST, DELETE' });
     let size = 0; const chunks: Buffer[] = [];
-    req.on('data', (c: Buffer) => { size += c.length; if (size > MAX_BODY) { json(res, 413, { error: 'Request too large.' }); req.destroy(); } else chunks.push(c); });
+    req.on('data', (c: Buffer) => { size += c.length; if (size > MAX_BODY) { json(res, 413, { error: `Request too large: over ${MAX_BODY / 1048576} MB, the most one request may carry. Split the work into several calls (an edit list in parts).` }); req.destroy(); } else chunks.push(c); });
     req.on('end', async () => {
       if (res.writableEnded) return;
       let body: any;

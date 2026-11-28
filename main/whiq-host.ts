@@ -143,14 +143,16 @@ export class WhiqHost {
     return p;
   }
 
+  // AGREED LIMIT (owner, 2026-11-28): 5 minutes — the router, then the agent server, must answer its health check within this (a probe of 2 s every half second) — why: item 26 rule 5, "Timers, memory, and safety - agreed" — arbitrary by agreement (a slow PC: cold disk, antivirus scanning the bundle).
   private async waitFor(url: string, what: string, live: () => void): Promise<void> {
-    for (let i = 0; i < 120; i++) {
+    const until = Date.now() + 5 * 60_000;
+    while (Date.now() < until) {
       live();
       if (this.status.state === 'failed') throw new Error(this.status.error);
       try { if ((await fetch(url, { signal: AbortSignal.timeout(2000) })).ok) return; } catch { /* not up yet */ }
       await sleep(500);
     }
-    throw new Error(`The platform agent's ${what} did not start within a minute; see ${this.paths.logs}.`);
+    throw new Error(`The platform agent's ${what} did not start within 5 minutes; see ${this.paths.logs}.`);
   }
 
   private kill(): void {

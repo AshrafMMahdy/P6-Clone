@@ -5,6 +5,7 @@
 /** Fields the assistant needs to work; extra parameters cannot replace them. */
 export const RESERVED_BODY = ['messages', 'tools', 'system', 'tool_choice', 'stream'];
 /** Sampling parameters the Claude API removed in version 2026-10-21: a request that sends one fails, at any value. */
+// AGREED LIMIT (owner, 2026-11-28): temperature, top_p and top_k are refused for Anthropic (the dialog says why; a saved one is not sent) — why: item 26 rule 6, "Necessary limits - agreed" — necessary because API version 2026-10-21 refuses them.
 export const ANTHROPIC_REMOVED_BODY = ['temperature', 'top_p', 'top_k'];
 
 /** Whether a provider can search the web by itself (the router's web_search vendors that need no extra key): an Anthropic
@@ -13,20 +14,22 @@ export function providerCanSearch(kind: string, baseUrl: string): boolean {
   return kind === 'anthropic' || kind === 'gemini' || /openrouter\.ai/i.test(baseUrl);
 }
 
-export function parseExtraHeaders(text: string | undefined): Record<string, string> {
+/** "Name: value" per line ('#' starts a comment). A line that is not that is refused, naming the line and the character that does
+ *  not belong in a header name (an invisible one pasted in, a space, a typographic dash): it is never rewritten into another
+ *  header (item 26, rule 1). provider 'anthropic': the workspace header has one name, anthropic-workspace-id. */
+export function parseExtraHeaders(text: string | undefined, provider?: string): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [i, raw] of (text ?? '').split(/\r?\n/).entries()) {
-    // tolerate what copy-paste and keyboards produce: invisible characters, typographic dashes, a full-width colon,
-    // non-breaking spaces, "=" instead of ":", and spaces in the name (HTTP names cannot have them; they become dashes)
-    const line = raw.replace(/[​-‍⁠﻿]/g, '').replace(/[‐-―−]/g, '-')
-      .replace(/：/g, ':').replace(/[  -  　]/g, ' ').trim();
+    const line = raw.trim();
     if (!line || line.startsWith('#')) continue;
-    const sep = line.search(/[:=]/);
-    const name = sep > 0 ? line.slice(0, sep).trim().replace(/\s+/g, '-') : '';
+    const sep = line.indexOf(':');
+    const name = sep > 0 ? line.slice(0, sep).trim() : '';
     if (!/^[A-Za-z0-9!#$%&'*+.^_`|~-]+$/.test(name)) {
       const odd = [...(sep > 0 ? name : line)].find((c) => !/[A-Za-z0-9!#$%&'*+.^_`|~-]/.test(c));
-      throw new Error(`Extra headers, line ${i + 1}: write it as "Header-Name: value"${odd ? ` (the name contains "${odd}", U+${odd.codePointAt(0)!.toString(16).toUpperCase().padStart(4, '0')})` : ''}.`);
+      throw new Error(`Extra headers, line ${i + 1}: write it as "Header-Name: value"${odd ? ` (the name contains "${odd}", U+${odd.codePointAt(0)!.toString(16).toUpperCase().padStart(4, '0')}${/\s/.test(odd) ? ', a space' : ''})` : ''}.`);
     }
+    // Anthropic reads a key's workspace from anthropic-workspace-id only (any letter case): another spelling is refused with that name
+    if (provider === 'anthropic' && /workspace/i.test(name) && name.toLowerCase() !== 'anthropic-workspace-id') throw new Error(`Extra headers, line ${i + 1}: Anthropic does not read "${name}"; its workspace header is anthropic-workspace-id (write "anthropic-workspace-id: ${line.slice(sep + 1).trim()}").`);
     out[name] = line.slice(sep + 1).trim();
   }
   return out;

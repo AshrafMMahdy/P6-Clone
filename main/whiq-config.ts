@@ -51,6 +51,7 @@ export function routerConfig(m: AgentModels): { config: Record<string, unknown>;
     if (tiers[t.name]) throw new Error(`Two tiers are named "${t.name}".`);
     tiers[t.name] = { provider: t.provider, model: t.model, params: t.params ?? {}, description: t.description ?? '' };
   }
+  // AGREED LIMIT (owner, 2026-11-28): an unset seat runs on the agent's tier, and web search on the agent's provider when it can search (the dialog says both) — why: item 26 rule 4, "Defaults - agreed" — the owner's design of the AI Providers page.
   const agentTier = m.seats?.agent ?? m.tiers[0].name;
   const seatTier = (seat: Seat): string | undefined => {
     const t = m.seats?.[seat];

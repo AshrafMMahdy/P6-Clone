@@ -153,7 +153,7 @@ test('WRITE: money text is the reference\'s: an assignment\'s costs and a custom
   const tasks = rows(db, 'TASK').filter((x) => x.task_type === 'TT_Task').slice(0, amounts.length);
   assert.equal(tasks.length, amounts.length);
   const ops: unknown[] = [{ op: 'add_resource', id: 'CARP', name: 'Carpenter' }, { op: 'add_udf', name: 'Budget', subject: 'activity', data_type: 'cost' }, { op: 'add_udf', name: 'Weight', subject: 'activity', data_type: 'number' }];
-  tasks.forEach((x, i) => ops.push({ op: 'assign_resource', activity: x.task_code, resource: 'CARP', units_per_day: 8 }, { op: 'set_udf', udf: 'Budget', activity: x.task_code, value: amounts[i] }, { op: 'set_udf', udf: 'Weight', activity: x.task_code, value: numbers[i] }));
+  tasks.forEach((x, i) => ops.push({ op: 'assign_resource', activity: x.task_code, resource: 'CARP', units_per_day: 8 }, { op: 'set_udf', udf: 'Budget', activity: x.task_code, value: amounts[i] }, { op: 'set_udf', udf: 'Weight', activity: x.task_code, value: Number(numbers[i]) }));
   assert.equal(applyOps(db, ops as never, { calendarDays: true }).ok, true);
   const carp = rows(db, 'RSRC').find((q) => q.rsrc_short_name === 'CARP')!.rsrc_id;
   tasks.forEach((x, i) => { const a = rows(db, 'TASKRSRC').find((q) => q.task_id === x.task_id && q.rsrc_id === carp)!; Object.assign(a, { target_cost: String(amounts[i]), act_reg_cost: '0', act_ot_cost: '0', remain_cost: String(amounts[i]) }); });

@@ -33,23 +33,9 @@ ok(await win.locator('.ai-panel').count() === 1, 'first time: the panel opens by
 const strip = await win.locator('.ai-strip').boundingBox(), panel = await win.locator('.ai-panel').boundingBox(), body = await win.locator('.winbody').boundingBox();
 ok(!!strip && !!panel && Math.abs(panel.x + panel.width - strip.x) <= 2, 'the strip stays visible to the right of the open panel');
 ok(!!body && !!panel && body.x + body.width <= panel.x + 1, 'the window makes room: nothing under the panel is covered');
-const box = await win.locator('.ai-panel textarea').boundingBox(), send = await win.locator('.ai-send').boundingBox();
-ok(!!box && !!send && send.x > box.x && send.x + send.width <= box.x + box.width && send.y + send.height <= box.y + box.height, 'the send button sits inside the message box, bottom right');
-ok(await win.locator('.ai-send').isDisabled(), 'send is disabled while the box is empty');
-// the message box grows with the text up to 10 lines, then scrolls; it shrinks back after sending
-const ta = win.locator('.ai-panel textarea');
-const h = () => ta.evaluate((e) => ({ h: e.clientHeight, sh: e.scrollHeight, lh: parseFloat(getComputedStyle(e).lineHeight) }));
-const h0 = await h();
-await ta.fill(Array.from({ length: 6 }, (_, i) => `line ${i + 1}`).join('\n'));
-const h6 = await h();
-ok(h6.h > h0.h + 2.5 * h0.lh, `grows with the text (3 lines ${h0.h}px, 6 lines ${h6.h}px)`);
-await ta.fill(Array.from({ length: 20 }, (_, i) => `line ${i + 1}`).join('\n'));
-const h20 = await h(), h25 = await (ta.fill(Array.from({ length: 25 }, (_, i) => `line ${i + 1}`).join('\n')), h());
-ok(h20.h === h25.h && h20.sh > h20.h && Math.round(h20.h / h20.lh) <= 11, `stops at about 10 lines (${h20.h}px) and scrolls the rest`);
-if (shots) { await win.waitForTimeout(4500); await win.screenshot({ path: join(shots, 'ai-long.png') }); }
-await win.fill('.ai-panel textarea', 'hello'); await win.click('.ai-send'); await win.waitForSelector('.ai-msg.ai', { timeout: 10000 });
-ok((await win.locator('.ai-msg.ai').innerText()) === 'OK', 'clicking the send icon sends the question');
-ok((await h()).h === h0.h, 'after sending, the box is back to 3 lines');
+// the agent turned off (P6CLONE_WHIQ=off): the panel says it is not available and why (item 26: the panel has no loop of its own)
+ok((await win.locator('.ai-panel .ai-body').innerText()).includes('The Scheduler Agent is not available, so the assistant cannot answer: Turned off (P6CLONE_WHIQ=off).'), 'the panel says the agent is off and why');
+ok(await win.locator('.ai-panel textarea').count() === 0, 'no message box of its own');
 ok(!(await win.locator('.ai-auto input').isChecked()), '"Open on startup" is off by default');
 if (shots) await win.screenshot({ path: join(shots, 'ai-open.png') });
 // a view with its own inner body (Projects), panel widened: room is made once, not twice
