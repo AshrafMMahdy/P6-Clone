@@ -45,6 +45,7 @@ export function detectCodepage(b: Uint8Array): TextEncodingName {
     else if (LONE.has(b[i]) && before < 0x80 && after < 0x80) inLatinWords++; // a lone word between spaces and punctuation
     if (before >= 0x80 || after >= 0x80) inRuns++;
   }
+  // AGREED LIMIT (owner, 2026-11-28): the shares below that pick an XER's code page (Windows-1252 when nothing is recognised); the guess is said as the ENCODING_CODEPAGE finding open_file lists — why: item 26 rule 7, "Analysis thresholds - agreed as long as it is visible" — arbitrary by agreement.
   if (!high || doubleEncodedShare(b) > 0.5) return 'windows-1252';
   if (inLatinWords >= high * 0.5) return latin(b, high);
   // East Asian double-byte code pages: the file decodes cleanly, mostly to ideographs or kana, and its characters are

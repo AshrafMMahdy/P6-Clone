@@ -468,6 +468,7 @@ function runGeometryWorker(ifc: string, outDir: string, productsBin: string, opt
     // geometry); what a run takes follows the chunk it meshes
     const child = spawn(process.execPath, [`--max-old-space-size=${heapMb()}`, ...childV8Flags(), script, ifc, outDir, '4', productsBin], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env: childEnv() });
     let err = '', out = '', stuck: StuckInfo | null = null;
+    // AGREED LIMIT (owner, 2026-11-28): 4,000 characters — a child's error is taken from the last 4,000 characters of its output — why: item 26 rule 5, "Timers, memory, and safety - agreed" — arbitrary by agreement.
     child.stderr.on('data', (d) => { err += String(d); if (err.length > 4000) err = err.slice(-4000); });
     // no fixed time limit: watched through its heartbeats, ended only when frozen (no progress and no processor time)
     const stop = heartbeatWatcher(child, { onText: (t) => { out += t; if (out.length > 4000) out = out.slice(-4000); }, onStuck: (i) => { stuck = i; try { child.kill(); } catch { /* gone */ } } });

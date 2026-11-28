@@ -48,10 +48,12 @@ function entry(): string {
   try { if (typeof __filename === 'string' && /p6clone-mcp|server\.(cjs|js)$/.test(__filename)) return __filename; } catch { /* ESM */ }
   return join(dirname(fileURLToPath(import.meta.url)), 'server.ts');
 }
+// AGREED LIMIT (owner, 2026-11-28): the CPU count less one, at least 2 — compute workers at once; past them a call waits its turn — why: item 26 rule 5, "Timers, memory, and safety - agreed" — necessary because each worker holds a copy of the project.
 const maxWorkers = () => Math.max(2, Number(process.env.P6CLONE_COMPUTE_WORKERS) || Math.max(2, cpus().length - 1));
 const idle: { w: Worker; timer: NodeJS.Timeout }[] = [];
 let active = 0;
 const waiting: (() => void)[] = [];
+// AGREED LIMIT (owner, 2026-11-28): 60 s — an idle compute worker is kept this long for the next call — why: item 26 rule 5, "Timers, memory, and safety - agreed" — arbitrary by agreement.
 const IDLE_MS = 60_000;
 /** Tools that keep their finished work when cancelled: the worker is asked to stop at its next step and answers with what it has
  *  (partial: monte_carlo's iterations, evaluate_batch's scenarios, crash_schedule's steps, optimize_schedule's final pass over the modes, lint's fix simulations). There is no fixed time limit and no stop while it works: it is ended only when FROZEN (no progress and no busy time of
@@ -101,6 +103,7 @@ function spawnWorker(): Worker {
   ensureCwd();
   // room for a new runtime is made (idle workers and idle projects go first) or the call is refused, in words
   reserveMemory(WORKER_RUNTIME_BYTES, 'A new worker thread (its own runtime)', 'Close projects you no longer need, or retry when the running calls have finished.')();
+  // AGREED LIMIT (owner, 2026-11-28): 1,024 MB at least — a worker's heap, else the memory budget — why: item 26 rule 5, "Timers, memory, and safety - agreed" — necessary because a worker under 1 GB cannot hold a large project.
   const w = new Worker(entry(), { workerData: { p6Compute: true }, resourceLimits: { maxOldGenerationSizeMb: Math.max(1024, Math.floor(effectiveBudget() / 1048576)) } });
   w.unref();
   live.add(w);
@@ -151,6 +154,7 @@ export const readTmpLog = (log: SharedArrayBuffer): string[] => Buffer.from(new 
 function foldersOf(logged: string[], a: Record<string, any>): string[] {
   const dirs = new Set(logged.map((t) => dirname(t))), base = config.writeRoot ?? config.root ?? safeCwd();
   const walk = (v: unknown, depth: number) => {
+    // AGREED LIMIT (owner, 2026-11-28): 40 folders, 3 levels — the clean-up after a worker ended mid-call looks no further for its temporary files (the cancel says which stayed) — why: item 26 rule 5, "Timers, memory, and safety - agreed" — arbitrary by agreement.
     if (dirs.size > 40 || depth > 3) return;
     if (typeof v === 'string' && v.length < 1024) {
       try { const p = resolve(base, v); dirs.add(dirname(p)); if (existsSync(p) && statSync(p).isDirectory()) dirs.add(p); } catch { /* not a path */ }
@@ -167,6 +171,7 @@ export function settleWrites(logged: string[], since: number, folders: string[] 
   for (const t of logged) {
     try { if (existsSync(t)) { rmSync(t, { force: true }); continue; } } catch { /* in use: left to the temp cleaner */ }
     const target = targetOf(t);
+    // AGREED LIMIT (owner, 2026-11-28): 1 s — the slack in judging that a file was written during the call — why: item 26 rule 5, "Timers, memory, and safety - agreed" — necessary because file times are coarse on some systems.
     try { if (existsSync(target) && statSync(target).mtimeMs >= since - 1000) finished.push(target); } catch { /* gone */ }
   }
   if (token) for (const d of folders) {
@@ -182,6 +187,7 @@ export function settleWrites(logged: string[], since: number, folders: string[] 
 export async function offload(name: string, a: Record<string, any>, s: Session, ctx: Ctx): Promise<unknown> {
   const others = readsHandles(name, a).map((h) => getSession(h)).filter((o) => o.handle !== s.handle); // an unknown handle is refused here, as it always was
   const releases: (() => void)[] = [];
+  // AGREED LIMIT (owner, 2026-11-28): 64 KB — the log of temporary files a worker made, read by the clean-up — why: item 26 rule 5, "Timers, memory, and safety - agreed" — arbitrary by agreement.
   const started = Date.now(), token = randomBytes(3).toString('hex'), tmpLog = new SharedArrayBuffer(1 << 16);
   const settle = () => settleWrites(readTmpLog(tmpLog), started, foldersOf(readTmpLog(tmpLog), a), token);
   let worker: Worker | null = null, held = 0; // held: what the worker reserved inside the call, counted here against the budget while it runs
@@ -196,6 +202,7 @@ export async function offload(name: string, a: Record<string, any>, s: Session, 
       for (const o of others) releases.push(reserveMemory(Math.max(o.bytes, 8 * 1048576), `A copy of project ${o.handle} for the worker that runs ${name}`, 'Close projects you no longer need, then call again.', s.handle));
       worker = await acquire();
     } catch (e) {
+      // AGREED LIMIT (owner, 2026-11-28): run on the main thread when no worker can be given the memory — why: item 26 rule 5, "Timers, memory, and safety - agreed" — necessary because a call that fits the budget only there must still run.
       if (e instanceof ToolError && e.code === 'memory_budget' && active === 0 && !worker) return RUN_HERE;
       throw e;
     }
@@ -336,6 +343,7 @@ export function startComputeWorker(run: (name: string, a: Record<string, any>, c
       keep: (row) => post({ id: job.id, type: 'kept', row }),
       // the claim lives on the main thread, which gives it back when this call ends there (its answer, or this worker ended)
       claim: (tool, path) => new Promise((given, refused) => { const n = ++claimSeq; claiming.set(n, { given: () => given(() => undefined), refused }); post({ id: job.id, type: 'claim', tool, path, n }); }),
+      // AGREED LIMIT (owner, 2026-11-28): 250 ms — a worker's progress notes at most every 250 ms — why: item 26 rule 5, "Timers, memory, and safety - agreed" — arbitrary by agreement (it only paces the notes).
       job: { set progress(text: string | undefined) { const now = Date.now(); if (now - last > 250) { last = now; post({ id: job.id, type: 'note', text: String(text) }); } } },
     };
     try {

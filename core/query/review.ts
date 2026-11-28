@@ -7,7 +7,7 @@ import { parseP6Date } from '../dates.ts';
 import { makeCtx, isCritical } from '../project/ctx.ts';
 import { storedDatesState } from '../schedule/stored-dates.ts';
 import { loopGroups, projectLoops } from '../xer/validate.ts';
-import { datesNotCurrent, loopStopsDates, NO_RESOURCE_ASSIGNED, notAssessed as notAssessedNote } from '../notes.ts';
+import { datesNotCurrent, LISTED, loopStopsDates, NO_RESOURCE_ASSIGNED, notAssessed as notAssessedNote } from '../notes.ts';
 import { differentDatesNote } from '../analysis/scheduleLog.ts';
 import { constraintsOf, DCMA_HARD, dataDateAssumedNotes, dataDateGaps } from '../analysis/common.ts';
 import { logicRelationships } from '../progress/snapshots.ts';
@@ -18,7 +18,7 @@ export const startedBeforeFsPredecessor = (t: Row, ctx: Pick<ReturnType<typeof m
 
 /** A check's grade; not_assessed: the file does not hold what the check needs (no data date, no resource assignments), said in its detail. The review's own grade is pass, warn or fail. */
 export type Grade = 'pass' | 'warn' | 'fail' | 'not_assessed';
-export interface Check { id: string; title: string; grade: Grade; count: number; of: number; percent: number | null; limit: string; /** a sentence about what was found, only where there is one */ detail?: string; examples: string[]; /** how many examples there are (examples shows the first 10 of a check's activities; saved_dates gives all) */ examples_total?: number;
+export interface Check { id: string; title: string; grade: Grade; count: number; of: number; percent: number | null; limit: string; /** a sentence about what was found, only where there is one */ detail?: string; examples: string[]; /** how many examples there are (examples lists every one; a tool's answer cuts it by the list rule) */ examples_total?: number;
   /** with opts.activities: every activity the check found, by Activity ID and name (an export) */ activities?: { id: string; name: string }[] }
 export interface Review { grade: Exclude<Grade, 'not_assessed'>; projects: string[]; openActivities: number; relationships: number; checks: Check[]; /** the sentences of a check whose detail holds several, by check id */ sentences?: Record<string, string[]> }
 
@@ -28,6 +28,7 @@ export function reviewSchedule(db: Db, opts: { hoursPerDay?: number; projIds?: s
   const projs = rows(db, 'PROJECT').filter((p) => !p._baseline_of && (!opts.projIds?.length || opts.projIds.includes(p.proj_id)));
   const open = new Set(projs.map((p) => p.proj_id));
   const ctx = makeCtx(db, { hoursPerDay: hpd });
+  // AGREED LIMIT (owner, 2026-11-28): the review's limits (44 working days, DCMA 14-point shares); each check says its limit ("at most 5%") — why: item 26 rule 7, "Analysis thresholds - agreed as long as it is visible" — necessary because they are the DCMA 14-point values.
   const dh = dayHours(db, hpd, !!opts.calendarDays); // 44 working days (of each activity's own calendar with calendarDays)
   const tasks = rows(db, 'TASK').filter((t) => open.has(t.proj_id));
   const live = tasks.filter((t) => !t.act_end_date && t.task_type !== 'TT_WBS' && t.task_type !== 'TT_LOE');
@@ -93,7 +94,11 @@ export function reviewText(r: Review): string {
   const out = [`Schedule review: ${r.projects.join(', ')} (${r.openActivities} open activities, ${r.relationships} relationships)`, ''];
   for (const c of r.checks) {
     out.push(`${mark[c.grade]}  ${c.title}: ${c.count}${c.percent != null && c.of ? ` of ${c.of} (${c.percent}%)` : ''}  [limit: ${c.limit}]`);
-    if (c.grade !== 'pass') { if (c.detail) out.push(`      ${c.detail}`); if (c.grade !== 'not_assessed') for (const e of c.examples.slice(0, 5)) out.push(`      - ${e}`); }
+    if (c.grade !== 'pass') {
+      if (c.detail) out.push(`      ${c.detail}`);
+      // the list rule (item 26, rule 3): the first LISTED, then how many more and where all are
+      if (c.grade !== 'not_assessed') { for (const e of c.examples.slice(0, LISTED)) out.push(`      - ${e}`); if (c.examples.length > LISTED) out.push(`      … and ${c.examples.length - LISTED} more (--json lists them all)`); }
+    }
   }
   out.push('', `Overall: ${mark[r.grade]}`);
   return out.join('\n');

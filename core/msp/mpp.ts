@@ -40,6 +40,7 @@ export const classPath = (home: string) => (existsSync(join(home, 'lib')) ? join
 export class MppReaderMissing extends Error {}
 
 /** A text file read in pieces of about `pieceBytes` (never one string: a document can be larger than the longest string, about 512 MB). A BOM is dropped. */
+// AGREED LIMIT (owner, 2026-11-28): 32 MB — the converted XML is read in pieces of this size — why: item 26 rule 5, "Timers, memory, and safety - agreed" — arbitrary by agreement (memory).
 export function readChunked(path: string, pieceBytes = Number(process.env.P6CLONE_XML_CHUNK_BYTES) || 32 * 1048576): Chunked {
   const out = new Chunked(), fd = openSync(path, 'r'), dec = new StringDecoder('utf8'), buf = Buffer.alloc(Math.max(1024, pieceBytes));
   try {
@@ -73,6 +74,7 @@ export async function mppToMspdi(path: string): Promise<Chunked> {
     let stuck: StuckInfo | null = null, text = '';
     const code = await new Promise<number | string>((done) => {
       const child = spawn(java, ['-Dlog4j2.loggerContextFactory=org.apache.logging.log4j.simple.SimpleLoggerContextFactory', '-Djava.awt.headless=true', '-cp', classPath(home), 'org.mpxj.sample.MpxjConvert', input, out], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+      // AGREED LIMIT (owner, 2026-11-28): 4,000 characters — a child's error is taken from the last 4,000 characters of its output — why: item 26 rule 5, "Timers, memory, and safety - agreed" — arbitrary by agreement.
       child.stdout.on('data', (d) => { text = (text + d).slice(-4000); });
       child.stderr.on('data', (d) => { text = (text + d).slice(-4000); });
       // no time limit: alive while the XML grows or Java uses the processor (frozen: neither, two windows in a row)

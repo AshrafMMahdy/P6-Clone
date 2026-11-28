@@ -16,6 +16,7 @@ export const CSTR_NAME: Record<string, string> = {
 export const cstrName = (code: string): string => CSTR_NAME[code] ?? code;
 
 /** Work minutes as days on a calendar with `hoursPerDay` hours in its day, at most two decimals ("-96", "0.5"). */
+// AGREED LIMIT (owner, 2026-11-28): 8 hours a day — where no calendar or hours_per_day gives the day, it is 8 hours, P6's own default (the answers say the hours used) — why: item 26 rule 4, "Defaults - agreed" — necessary because a day must have hours.
 export const minutesToDays = (minutes: number, hoursPerDay: number): number => Math.round((minutes / 60 / (hoursPerDay || 8)) * 100) / 100;
 /** A number of days as text: "1 day", "-4 days", "0.5 days". */
 export const daysText = (days: number): string => `${days} ${Math.abs(days) === 1 ? 'day' : 'days'}`;

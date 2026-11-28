@@ -43,6 +43,7 @@ export function parsePsCpu(text: string): Array<[number, number, number]> {
   return text.split('\n').map((l) => l.trim().split(/\s+/)).filter((c) => c.length >= 3).map((c): [number, number, number] => [Number(c[0]), Number(c[1]), secs(c[2]) * 1000]).filter((r) => r.every(Number.isFinite));
 }
 const run = (cmd: string, args: string[]) => new Promise<string | null>((done) => {
+  // AGREED LIMIT (owner, 2026-11-28): 20 s, 16 MB — the process-table probe's time and output — why: item 26 rule 5, "Timers, memory, and safety - agreed" — necessary because a probe must not hang; the numbers arbitrary by agreement.
   try { execFile(cmd, args, { windowsHide: true, timeout: 20_000, maxBuffer: 16 << 20 }, (e, out) => done(e ? null : String(out))); } catch { done(null); }
 });
 const lower = (n: string) => n.toLowerCase();
@@ -117,6 +118,7 @@ export const childV8Flags = (): string[] => (!process.versions.electron && Numbe
 
 // ---- the rule (the platform's, craftSupervisor.ts livenessVerdict) ---------------------------------------------------
 /** The window of the check (the platform's: 5 s). P6CLONE_LIVENESS_WINDOW_MS (the environment only: tests) shortens it. */
+// AGREED LIMIT (owner, 2026-11-28): 5 s window, 10 ms of CPU = busy, 2 idle / 3 unread windows = frozen, heartbeat 5 s — the one rule that ends a child (Java, IFC workers, Chromium) that has stopped — why: item 26 rule 5, "Timers, memory, and safety - agreed" — necessary because a stopped child must be ended; the numbers arbitrary by agreement.
 export const livenessWindowMs = () => Number(process.env.P6CLONE_LIVENESS_WINDOW_MS) || 5_000;
 /** Processor time in a window that means the work is running (the platform's 10 ms). */
 export const BUSY_CPU_MS = 10;

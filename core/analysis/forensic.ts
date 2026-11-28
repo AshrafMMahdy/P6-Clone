@@ -41,6 +41,7 @@ export const riskStatusOf = (risk: number): 'pass' | 'warning' | 'fail' => (risk
 // Float figures (source core/float.ts:20-56 computeFloatMetrics)
 
 /** Total float, in working days, up to which an activity that is not critical is near-critical. Bellatorsi API/src/core/float.ts:25 (also scheduleRiskIndex.ts:75). */
+// AGREED LIMIT (owner, 2026-11-28): 5 working days — near-critical is total float of 5 days or less; the answer says the value — why: item 26 rule 7, "Analysis thresholds - agreed as long as it is visible" — arbitrary by agreement.
 export const NEAR_CRITICAL_DAYS = 5;
 
 export interface FloatFigures {

@@ -285,6 +285,7 @@ export function runTool(name: string, args: Record<string, any>, db: Db, ctx: Ct
       const stale = [...dataDateGaps([...open].map((pid) => ctx.proj.get(pid)!).filter(Boolean), '', 'data_date', false), ...storedDatesState(db, [...open]).stale.map((x) => datesNotCurrent(x.proj, x.differ, x.open, true, x.keptMsp))]; // (a project with no data date and no planned start cannot be rescheduled: the saved dates are all there is)
       return { total: crit.length, longest_path_flags_present: tasks.some((t) => t.driving_path_flag === 'Y'), offset: pg.offset, next_offset: pg.next_offset, activities: pg.rows.map(brief), ...(stale.length ? { notes: stale } : {}) };
     }
+    // AGREED LIMIT (owner, 2026-11-28): 44 working days and the shares of schedule_health below (DCMA 14-point); each check says its limit — why: item 26 rule 7, "Analysis thresholds - agreed as long as it is visible" — necessary because they are the DCMA 14-point values.
     case 'schedule_health': {
       const live = tasks.filter((t) => !t.act_end_date && t.task_type !== 'TT_WBS' && t.task_type !== 'TT_LOE');
       const P = logicRelationships(db).filter((r) => open.has(r.proj_id));

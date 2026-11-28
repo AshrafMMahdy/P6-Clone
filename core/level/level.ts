@@ -459,6 +459,7 @@ export function levelResources(db: Db, projIds: string[], opts: LevelOptions): L
     const hrs = final.hours.get(rid)!, lim = (d: number) => limitAt(rid, d * MIN_PER_DAY) * (hrs.get(d) ?? 0);
     let worst = 0, day = 0, peak = 0, pday = 0;
     for (const [d, h] of u) { if (h - lim(d) > worst) { worst = h - lim(d); day = d; } if (h > peak) { peak = h; pday = d; } }
+    // AGREED LIMIT (owner, 2026-11-28): 0.01 h — a resource over its limit by 0.01 h or less is not reported as still overallocated — why: item 26 rule 7, "Analysis thresholds - agreed as long as it is visible" — arbitrary by agreement (a rounding, not an overload).
     if (worst > 0.01) still.push(`      Resource ${rsrcs.get(rid)?.rsrc_short_name ?? rid} still overallocated by ${hours(worst)} h on ${formatP6Date(day * MIN_PER_DAY).slice(0, 10)}`);
     // (a resource still over its limit: the day it is most over, which need not be its highest day when the limit changes by date)
     const over = worst > 0.01, at = over ? day : pday;

@@ -16,6 +16,7 @@ import {
 } from './common.ts';
 import { beiFigures } from './forensic.ts';
 
+// AGREED LIMIT (owner, 2026-11-28): P6 Check Schedule's own thresholds below (threshold_source names them; threshold_days overrides the 44 days) — why: item 26 rule 7, "Analysis thresholds - agreed as long as it is visible" — necessary because they are P6's defaults.
 const SRC = 'P6 Professional default (Check Schedule Report)';
 export const P6_CHECKS: { id: string; name: string; th: Threshold }[] = [
   { id: 'logic', name: 'Logic (missing predecessors or successors)', th: { op: '<', value: 5, source: SRC } },
@@ -42,7 +43,7 @@ export interface CheckScheduleOptions {
   targets?: Record<string, number>;
   /** the long lag / large float / large duration threshold in hours (default 44 days x hours per day) */
   thresholdHours?: number;
-  /** activities listed per check (default 100; 0 = all) */
+  /** activities listed per check (default and 0: all) */
   maxIds?: number;
 }
 
@@ -58,7 +59,7 @@ export interface CheckScheduleReport {
 
 export function checkSchedule(db: Db, o: CheckScheduleOptions = {}): CheckScheduleReport {
   const s = makeScope(db, { projIds: o.projIds, hoursPerDay: o.hoursPerDay, calendarDays: false });
-  const maxIds = o.maxIds ?? 100, thH = o.thresholdHours ?? 44 * s.hpd, thD = Math.round((thH / s.hpd) * 100) / 100, dayOf = (h: number) => `${Math.round((h / s.hpd) * 100) / 100} d`;
+  const maxIds = o.maxIds ?? 0, thH = o.thresholdHours ?? 44 * s.hpd, thD = Math.round((thH / s.hpd) * 100) / 100, dayOf = (h: number) => `${Math.round((h / s.hpd) * 100) / 100} d`;
   const want = new Set(o.checks?.length ? o.checks : P6_CHECKS.map((c) => c.id));
   const th = (id: string): Threshold => { const d = P6_CHECKS.find((c) => c.id === id)!.th; return o.targets?.[id] != null ? { ...d, value: o.targets[id], source: 'override' } : d; };
   const name = (id: string) => P6_CHECKS.find((c) => c.id === id)!.name;

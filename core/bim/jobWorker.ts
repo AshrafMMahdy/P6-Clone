@@ -28,6 +28,7 @@ export async function inWorker<T>(o: WorkerJob, after: (dir: string) => T | Prom
     const err = await new Promise<string | null>((done) => {
       const child = spawn(process.execPath, [...(o.heapMb ? [`--max-old-space-size=${o.heapMb}`] : []), ...childV8Flags(), o.script, jobFile], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env: { ...process.env, ...heartbeatEnv(), ...(process.versions.electron ? { ELECTRON_RUN_AS_NODE: '1' } : {}) } });
       let text = '', stuck: StuckInfo | null = null;
+      // AGREED LIMIT (owner, 2026-11-28): 4,000 characters — a child's error is taken from the last 4,000 characters of its output — why: item 26 rule 5, "Timers, memory, and safety - agreed" — arbitrary by agreement.
       child.stderr.on('data', (c) => { text = (text + c).slice(-4000); });
       const stop = heartbeatWatcher(child, { onStuck: (i) => { stuck = i; try { child.kill(); } catch { /* gone */ } } });
       child.on('error', (e) => { stop(); done(e.message); });

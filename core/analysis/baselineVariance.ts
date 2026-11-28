@@ -13,7 +13,8 @@ import type { Update } from './delay.ts';
 import { baselineOf, baselineFinish, forecastFinish, isDone, isLoe, isMilestone, isWbs, makeScope, savedBaselines } from './common.ts';
 import { baselinePairs, beiFigures, currentStart, schedulePairs, varianceDetail, type ActivityVariance, type Assessed, type ReferencePairs, type SlipClass } from './forensic.ts';
 
-/** A delay driver is an activity whose finish is this many working days or more behind the other side (delayAnalysis.ts:96, :113-114: min_impact_days default 1; the source's number, not yet agreed with the owner: ledger item 26). */
+/** A delay driver is an activity whose finish is this many working days or more behind the other side (delayAnalysis.ts:96, :113-114: min_impact_days default 1; the source's number, agreed with the owner in item 26). */
+// AGREED LIMIT (owner, 2026-11-28): 1 day — a delay driver counts from 1 day; the answer says it — why: item 26 rule 7, "Analysis thresholds - agreed as long as it is visible" — arbitrary by agreement.
 export const DRIVER_MIN_DAYS = 1;
 export type VarianceType = 'start_delay' | 'finish_delay' | 'duration_overrun' | 'compound_delay';
 const r2 = (v: number) => Math.round(v * 100) / 100;

@@ -155,6 +155,7 @@ export function calendarResolver(db: Db, findings: Finding[]) {
     } catch (e) {
       findings.push({ severity: 'warning', code: 'SCHED_CAL_INVALID', table: 'CALENDAR', key: id, message: `Calendar ${r.clndr_name} cannot be read (${(e as Error).message}): the standard 5-day calendar was used for ${plural(db.tables.TASK?.rows.filter((t) => t.clndr_id === id).length ?? 0, 'activity', 'activities')}.`, p6: 'P6 cannot use the calendar.' });
     }
+    // AGREED LIMIT (owner, 2026-11-28): an unreadable calendar is scheduled on the standard 5-day calendar, said (SCHED_CAL_INVALID / SCHED_CAL_DEFAULT) — why: item 26 rule 6, "Necessary limits - agreed" — necessary because P6 does the same.
     d ??= standardCalendar();
     // Project and resource calendars inherit holidays from their base calendar.
     const loop = r.base_clndr_id ? [...chain, id].indexOf(r.base_clndr_id) : -1;

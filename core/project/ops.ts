@@ -124,7 +124,8 @@ export const OP_GUIDE = [
 class OpError extends Error {}
 const fail = (m: string): never => { throw new OpError(m); };
 const str = (v: unknown, what: string): string => (typeof v === 'string' && v.trim() ? v.trim() : fail(`"${what}" is required (text).`));
-const num = (v: unknown, what: string): number => (typeof v === 'number' && Number.isFinite(v) ? v : typeof v === 'string' && v.trim() && Number.isFinite(Number(v)) ? Number(v) : fail(`"${what}" must be a number.`));
+// a number is a JSON number: "15" (text) is refused, not read as 15 (item 26, rule 1: wrong input is refused in words)
+const num = (v: unknown, what: string): number => (typeof v === 'number' && Number.isFinite(v) ? v : fail(`"${what}" must be a number${typeof v === 'string' && v.trim() && Number.isFinite(Number(v)) ? ` (${JSON.stringify(v)} is text: send it without quotes)` : ''}.`));
 const date = (v: unknown, what: string): string => { const d = typeof v === 'string' ? normDate(v) : null; return d ? d : fail(`"${what}" must be a date like 2026-03-02 or 2026-03-02 08:00.`); };
 const ok = (msg: string | void) => { if (msg) fail(msg); };
 

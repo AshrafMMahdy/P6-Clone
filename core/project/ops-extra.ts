@@ -480,9 +480,10 @@ export function applyExtra(db: Db, op: Op, h: OpHelpers): unknown {
       const S = codeSubject(op.subject);
       const name = str(op.name, 'name');
       if (rows(db, S.type).some((t) => lc(t[S.tname]) === lc(name))) fail(`Code type "${name}" already exists.`);
+      if (op.max_length != null && (!Number.isInteger(num(op.max_length, 'max_length')) || (op.max_length as number) < 1)) fail(`max_length must be a whole number from 1 to ${CODE_MAX}.`);
       if (op.max_length != null && num(op.max_length, 'max_length') > CODE_MAX) fail(`max_length ${op.max_length} is more than P6 allows for a code value (${CODE_MAX}).`);
       const T = ensure(db, S.type, [S.tid, S.tlen, 'seq_num', S.tname, ...(S.type === 'ACTVTYPE' ? ['proj_id', 'wbs_id', 'actv_code_type_scope', 'super_flag'] : [])]);
-      const row: Row = { [S.tid]: String(nextId(db, S.type)), [S.tlen]: String(op.max_length != null ? Math.max(1, Math.floor(num(op.max_length, 'max_length'))) : 20), seq_num: String(T.rows.length + 1), [S.tname]: name };
+      const row: Row = { [S.tid]: String(nextId(db, S.type)), [S.tlen]: String(op.max_length != null ? num(op.max_length, 'max_length') : 20), seq_num: String(T.rows.length + 1), [S.tname]: name };
       if (S.type === 'ACTVTYPE') {
         const proj = lc(op.scope) === 'project';
         if (op.scope != null && !['project', 'global'].includes(lc(op.scope))) fail('scope must be global or project.');

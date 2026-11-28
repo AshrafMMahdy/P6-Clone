@@ -98,7 +98,7 @@ export async function windowsAnalysis(updates: Update[], o: { milestone?: string
   const cal = calendarResolver(first.db, []).fallback(p0?.clndr_id ?? '');
   const hpd = cal.hoursPerDay() || o.hoursPerDay || 8;
   const wd = (a: number | null, b: number | null) => (a == null || b == null ? null : r2(cal.workBetween(a, b) / 60 / hpd));
-  const max = o.maxIds ?? 50;
+  const max = o.maxIds ?? 0; // every activity unless a count is asked (the tool asks for all and cuts its answer by the list rule; the desktop shows all)
   const windows = [];
   const slipNotes: string[] = [];
   for (let i = 1; i < list.length; i++) {

@@ -6,7 +6,8 @@ import type { TextEncodingName } from '../core/encoding.ts';
 import { findUnicodeFont } from '../renderer/print/system-font.ts';
 import { writeOut } from './commands.ts';
 import { validateXer } from '../core/xer/validate.ts';
-import { writeXer } from '../core/xer/write.ts';
+import { NEW_XER_NOTE, NEW_XER_VERSION, writeXer } from '../core/xer/write.ts';
+import { namesText } from '../core/notes.ts';
 import { diffDbs, compareSchedules, compareText } from '../core/diff.ts';
 import { worst, type Finding } from '../core/findings.ts';
 import type { Db } from '../core/db.ts';
@@ -24,8 +25,11 @@ function queryText(v: unknown, indent = ''): string {
     if (v.length && typeof v[0] === 'object' && v[0] && !Array.isArray(v[0])) {
       const cols = [...new Set(v.flatMap((r) => Object.keys(r as object)))];
       const cell = (x: unknown) => (x == null ? '' : typeof x === 'object' ? JSON.stringify(x) : String(x));
-      const w = cols.map((c) => Math.min(40, Math.max(c.length, ...v.map((r) => cell((r as Record<string, unknown>)[c]).length))));
-      return [cols.map((c, i) => c.padEnd(w[i])).join('  '), ...v.map((r) => cols.map((c, i) => cell((r as Record<string, unknown>)[c]).slice(0, 40).padEnd(w[i])).join('  '))].map((l) => indent + l).join('\n');
+      // AGREED LIMIT (owner, 2026-11-28): 40 characters a cell in the text table — a column is never wider — why: item 26 rule 3, a list or text cut in an answer says so and
+      // where the whole is — arbitrary by agreement (a terminal layout); the line under the table says when a cell was cut, and --json gives every cell whole
+      const W = 40, w = cols.map((c) => Math.min(W, Math.max(c.length, ...v.map((r) => cell((r as Record<string, unknown>)[c]).length))));
+      const cut = v.some((r) => cols.some((c) => cell((r as Record<string, unknown>)[c]).length > W));
+      return [cols.map((c, i) => c.padEnd(w[i])).join('  '), ...v.map((r) => cols.map((c, i) => cell((r as Record<string, unknown>)[c]).slice(0, W).padEnd(w[i])).join('  ')), ...(cut ? [`(cells longer than ${W} characters are cut here; --json gives them whole)`] : [])].map((l) => indent + l).join('\n');
     }
     return v.map((x) => indent + '- ' + (typeof x === 'object' ? JSON.stringify(x) : String(x))).join('\n');
   }
@@ -84,7 +88,8 @@ for (let i = 1; i < args.length; i++) {
   if (args[i].startsWith('--')) { if (!BOOL.has(args[i])) i++; }
   else positional.push(args[i]);
 }
-const hpd = () => Number(opt('hours-per-day') ?? 8);
+/** --hours-per-day: hours a day for durations given in days (default 8, P6's own); refused when it is not a number of hours above 0 and at most 24 */
+const hpd = () => { const v = opt('hours-per-day'); if (v == null) return 8; const n = Number(v); if (!v.trim() || !Number.isFinite(n) || n <= 0 || n > 24) throw new Error(`--hours-per-day must be a number of hours above 0 and at most 24 (got "${v}").`); return n; };
 
 /** Read an XER, P6 XML, Microsoft Project XML or MPX file (by content and extension). */
 function load(path: string): { db: Db; findings: Finding[]; format: Format } {
@@ -131,14 +136,21 @@ async function main(): Promise<number> {
     }
     case 'export': {
       const { db } = load(positional[0]);
-      const version = opt('version') ?? '19.12';
+      const version = opt('version');
       const out = opt('out');
       if (!out) throw new Error('--out required');
-      if ((opt('format') ?? 'xer') === 'xml') {
+      const format = opt('format') ?? 'xer';
+      if (format !== 'xer' && format !== 'xml') throw new Error(`--format must be xer or xml (got "${format}").`);
+      // the versions the MCP save writes: P6 XML 19.12 when none is asked (said); an XER keeps the version it was read with, else NEW_XER_VERSION (said)
+      if (format === 'xml') {
         const { writeP6Xml, p6xmlLosses, p6xmlLossNotes } = await import('../core/xml/p6xml.ts');
-        writeFileSync(out, writeP6Xml(db, { version }));
+        writeFileSync(out, writeP6Xml(db, { version: version ?? '19.12' }));
+        if (version == null) console.log('Written as P6 XML version 19.12, the version given when none is asked (--version for another): a P6 older than 19.12 may refuse it.');
         for (const n of p6xmlLossNotes(p6xmlLosses(db))) console.log(n);
-      } else writeFileSync(out, writeXer(db, { version }));
+      } else {
+        writeFileSync(out, writeXer(db, { version: version ?? db.header?.version ?? NEW_XER_VERSION }));
+        if (version == null && !db.header?.version) console.log(NEW_XER_NOTE);
+      }
       console.log(`Wrote ${out}`);
       return 0;
     }
@@ -153,14 +165,14 @@ async function main(): Promise<number> {
       const out = opt('out');
       if (!out) throw new Error('--out required');
       const db: Db = { tables: {} };
-      const id = opt('id') ?? 'NEW';
+      const id = opt('id') ?? 'NEW', start = opt('start') ?? new Date().toISOString().slice(0, 10);
       const currency = opt('currency');
       if (!currency) throw new Error('--currency required: the base currency costs are kept in, an ISO 4217 code (EUR, GBP, SAR …)');
-      const r = applyOps(db, [{ op: 'add_project', id, name: opt('name') ?? id, start: opt('start') ?? new Date().toISOString().slice(0, 10), currency }]);
+      const r = applyOps(db, [{ op: 'add_project', id, name: opt('name') ?? id, start, currency }]);
       if (!r.ok) { console.error(r.error!.message); return 65; }
       writeOut(out, db, opt('version'));
       if (flag('json')) console.log(JSON.stringify({ ok: true, project: id, out }));
-      else console.log(`Created project ${id} in ${out}`);
+      else console.log(`Created project ${id} in ${out}${opt('id') == null ? ' (no --id given: the Project ID is NEW)' : ''}, starting ${start}${opt('start') == null ? ' (no --start given: today)' : ''}`);
       return 0;
     }
     case 'edit': {
@@ -313,7 +325,8 @@ async function main(): Promise<number> {
           starts_after: opt('starts-after'), starts_before: opt('starts-before'), finishes_after: opt('finishes-after'), finishes_before: opt('finishes-before'),
           max_total_float_days: n('max-float'), min_total_float_days: n('min-float'), milestones_only: flag('milestones') || undefined, activity_code: opt('code'), sort: opt('sort'), limit: n('limit'),
         };
-      const projIds = opt('project') ? (db.tables.PROJECT?.rows ?? []).filter((p) => p.proj_short_name === opt('project')).map((p) => p.proj_id) : [];
+      const P = (db.tables.PROJECT?.rows ?? []).filter((p) => !p._baseline_of), projIds = opt('project') ? P.filter((p) => p.proj_short_name === opt('project')).map((p) => p.proj_id) : [];
+      if (opt('project') && !projIds.length) throw new Error(`No project "${opt('project')}" in ${positional[0]}; its Project IDs: ${namesText(P.map((p) => p.proj_short_name))}.`);
       const res = runTool(tool, qargs, db, makeCtx(db, { hoursPerDay: hpd() }), projIds, hpd(), true);
       console.log(flag('json') ? JSON.stringify(res, null, 2) : queryText(res));
       return (res as { error?: string })?.error ? 66 : 0;

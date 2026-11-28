@@ -75,6 +75,7 @@ export interface LintThresholds {
   /** the lowest score of each grade */
   grades: Record<string, number>;
 }
+// AGREED LIMIT (owner, 2026-11-28): every lint band, weight and grade below; the answer lists those applied, and thresholds overrides them — why: item 26 rule 7, "Analysis thresholds - agreed as long as it is visible" — arbitrary by agreement.
 export const DEFAULT_LINT_THRESHOLDS: LintThresholds = {
   dangling_start: { max: 0 }, dangling_finish: { max: 0 }, empty_wbs: { max: 0 }, milestone_duration: { max: 0 }, loe_on_critical: { max: 0 },
   fs_overlap: { max_lead_days: 0 }, constraints: { max_hard: 0 },

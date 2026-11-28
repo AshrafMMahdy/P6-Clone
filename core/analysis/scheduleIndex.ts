@@ -31,6 +31,7 @@ export type SubKey = keyof typeof RISK_WEIGHTS;
 /** Float risk = 100 x (0.5 x negative-float share + 0.3 x near-critical share + 0.2 x critical share), at most 100. scheduleRiskIndex.ts:87. */
 const FLOAT_RISK = { negative: 0.5, near_critical: 0.3, critical: 0.2 } as const;
 /** Baseline drift risk = at most 100 of: 2 x average finish variance (days, not below 0) + 40 x (1 - BEI, BEI at most 1) + critical-path delay (days, at most 30). scheduleRiskIndex.ts:149. */
+// AGREED LIMIT (owner, 2026-11-28): the drift factors and the 30-day cap of the critical-path delay; the answer shows the parts and weights — why: item 26 rule 7, "Analysis thresholds - agreed as long as it is visible" — arbitrary by agreement (the method's numbers).
 const DRIFT = { variance_factor: 2, bei_factor: 40, delay_cap: 30 } as const;
 /** Resource risk = 50 x share of limited resources over-allocated + 35 x share of work activities with no resource + 15 if an over-allocated resource is on a critical activity. resourceAnalysis.ts:258-261. */
 const RESOURCE = { over_allocated: 0.5, coverage_gap: 0.35, critical_conflict: 0.15 } as const;

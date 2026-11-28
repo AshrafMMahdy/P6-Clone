@@ -197,6 +197,7 @@ async function runNavisworks(job: NwJob, onProgress?: Progress): Promise<Naviswo
         out += c;
         for (let i; (i = out.indexOf('\n')) >= 0; out = out.slice(i + 1)) { const m = /^progress (\d+) (\d+) (.*)$/.exec(out.slice(0, i)); if (m) void Promise.resolve(onProgress?.(Number(m[1]), Number(m[2]), m[3])).catch(() => {}); }
       };
+      // AGREED LIMIT (owner, 2026-11-28): 4,000 characters — a child's error is taken from the last 4,000 characters of its output — why: item 26 rule 5, "Timers, memory, and safety - agreed" — arbitrary by agreement.
       child.stderr.on('data', (c) => { text = (text + c).slice(-4000); });
       // no fixed time limit (owner rules 2026-10-27, 2026-10-28): the reader is watched through its heartbeats (heartbeat.mjs, liveness.ts) and ended
       // only when frozen: no progress and no processor time for two windows in a row (P6CLONE_NWD_MINUTES, if set, is an optional

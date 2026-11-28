@@ -5,6 +5,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 
+// AGREED LIMIT (owner, 2026-11-28): 10 MB — an HTTP request body over it is refused ("Request too large.") — why: item 26 rule 6, "Necessary limits - agreed" — necessary because an HTTP server bounds what it reads; 10 MB arbitrary by agreement.
 const MAX_BODY = 10 * 1048576;
 export type McpHandler = (m: any, session?: string) => Promise<unknown | undefined>;
 

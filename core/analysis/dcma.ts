@@ -21,6 +21,7 @@ type Key = 'logic' | 'leads' | 'lags' | 'relationship_types' | 'hard_constraints
 type Profile = Record<Key, number | null>;
 
 /** PAM 200.1 thresholds (percent of the population; FS share is a minimum; CPLI and BEI are ratios). */
+// AGREED LIMIT (owner, 2026-11-28): DCMA PAM 200.1 (and the GAO / AACE / NASA profiles below); each check names its source — why: item 26 rule 7, "Analysis thresholds - agreed as long as it is visible" — necessary because they are the published values.
 const PAM: Profile = { logic: 5, leads: 0, lags: 5, relationship_types: 90, hard_constraints: 5, high_float: 5, negative_float: 0, high_duration: 5, invalid_dates: 0, resources: 0, missed_tasks: 5, critical_path_test: null, cpli: 0.95, bei: 0.95 };
 export const DCMA_PROFILES: Record<string, { label: string; t: Profile }> = {
   pam200: { label: 'DCMA PAM 200.1 (default)', t: PAM },
@@ -38,6 +39,7 @@ const NAMES: Record<Key, string> = {
 const OPS: Record<Key, Threshold['op']> = { logic: '<=', leads: '<=', lags: '<=', relationship_types: '>=', hard_constraints: '<=', high_float: '<=', negative_float: '<=', high_duration: '<=', invalid_dates: '<=', resources: '<=', missed_tasks: '<=', critical_path_test: '=', cpli: '>=', bei: '>=' };
 
 /** The working days dcma_14's critical path test (check 12) adds to the activity it delays when cptSlipDays is not given; decm's 06A401a runs the same test with the same value. */
+// AGREED LIMIT (owner, 2026-11-28): 600 working days — the critical path test delays one critical activity by this and checks the finish moves by it; cpt_slip_days overrides it — why: item 26 rule 7, "Analysis thresholds - agreed as long as it is visible" — arbitrary by agreement.
 export const CPT_SLIP_DAYS = 600;
 
 export interface DcmaOptions {
@@ -57,7 +59,7 @@ export interface DcmaOptions {
   cptActivity?: string;
   /** high float / high duration limit in working days (default 44); dynamic: max(20, 10% of the project's length) */
   limitDays?: number | 'dynamic';
-  /** activities listed per check (default 100; 0 = all) */
+  /** activities listed per check (default and 0: all) */
   maxIds?: number;
   /** activity IDs exempt from the logic check (e.g. the project start and finish) */
   exempt?: string[];
@@ -84,7 +86,7 @@ export function dcma14(db: Db, o: DcmaOptions = {}): DcmaReport {
     const v = prof.t[k];
     return v == null ? null : { op: OPS[k], value: v, source: prof.label };
   };
-  const maxIds = o.maxIds ?? 100;
+  const maxIds = o.maxIds ?? 0;
   const days = (t: Row, h: string | undefined) => (h === '' || h == null ? null : Number(h) / s.dh.task(t));
   const which = o.baseline ?? 'project';
   const bls = new Map(s.projs.map((p) => [p.proj_id, baselineOf(db, p, which)]));

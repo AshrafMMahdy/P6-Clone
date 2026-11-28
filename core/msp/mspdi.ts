@@ -99,6 +99,7 @@ function exceptionDays(ex: XNode): { days: Map<number, Shift[]>; known: boolean;
   const tp = child(ex, 'TimePeriod');
   if (!tp) return { days, known: true, long: false };
   const ss = dayShifts(ex);
+  // AGREED LIMIT (owner, 2026-11-28): what a Microsoft Project file leaves out is the MSPDI schema's own default (Type 1, 480 minutes a day …) — why: item 26 rule 4, "Defaults - agreed" — necessary because they are the format's defaults.
   const type = Number(val(ex, 'Type') || '1');
   const d0 = serialOf(val(tp, 'FromDate')), to = serialOf(val(tp, 'ToDate'));
   if (d0 == null) return { days, known: true, long: false };

@@ -30,7 +30,7 @@ const FROM_F9: [string, string, 'errors' | 'warnings' | 'exceptions'][] = [
 ];
 
 /** Sections P6 prints that are computed from the scheduled dates (shared by the MCP log and the desktop Schedule Log). */
-export function extraLogSections(db: Db, projIds: string[], maxIds = 100, leftOut: Row[] = []): { warnings: LogSection[]; exceptions: LogSection[] } {
+export function extraLogSections(db: Db, projIds: string[], maxIds = 0, leftOut: Row[] = []): { warnings: LogSection[]; exceptions: LogSection[] } {
   const open = new Set(projIds);
   const tasks = rows(db, 'TASK').filter((t) => open.has(t.proj_id));
   const ctx = makeCtx(db, { hoursPerDay: 8 });
@@ -87,7 +87,7 @@ export function extraLogSections(db: Db, projIds: string[], maxIds = 100, leftOu
 }
 
 /** The whole log as data, from an F9 result. */
-export function scheduleLogReport(db: Db, projIds: string[], res: Pick<ScheduleResult, 'findings' | 'stats' | 'broken'>, maxIds = 100): ScheduleLogReport {
+export function scheduleLogReport(db: Db, projIds: string[], res: Pick<ScheduleResult, 'findings' | 'stats' | 'broken'>, maxIds = 0): ScheduleLogReport {
   const out: ScheduleLogReport = { statistics: res.stats, errors: [], warnings: [], exceptions: [] };
   const byCode = (code: string) => res.findings.filter((f: Finding) => f.code === code);
   const names = new Map(rows(db, 'TASK').filter((t) => projIds.includes(t.proj_id)).map((t) => [t.task_code, t.task_name]));

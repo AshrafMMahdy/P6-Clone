@@ -2,6 +2,7 @@ import { MIN_PER_DAY } from '../dates.ts';
 import type { CalendarDef, Shift } from './clndr-data.ts';
 
 const OLE_OFFSET = 25569; // OLE serial of day index 0 (1970-01-01)
+// AGREED LIMIT (owner, 2026-11-28): 20 years — a calendar with no work time within 20 years stops the calculation, said ("Refused: …") — why: item 26 rule 6, "Necessary limits - agreed" — necessary because the search for work time must end; 20 years arbitrary by agreement.
 const HORIZON_DAYS = 366 * 20;
 
 export class CalendarHorizonError extends Error {}

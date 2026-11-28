@@ -16,9 +16,10 @@ import { logicRelationships } from '../progress/snapshots.ts';
 export type Mode = 'latest' | 'all_periods';
 /** The two modes of the source (changeTracking.ts:81, :86: `latest` compares the last update with the current one, `all_periods` every consecutive pair); its third value specific_dates is accepted by its schema and does nothing different, so it is not carried over. */
 export const MODES: Mode[] = ['latest', 'all_periods'];
-/** A date change is material from this many working days (the source's 1 calendar day: changeTracking.ts:82, :246; the source's number, not yet agreed with the owner: ledger item 26). */
+/** A date change is material from this many working days (the source's 1 calendar day: changeTracking.ts:82, :246; the source's number, agreed with the owner in item 26). */
+// AGREED LIMIT (owner, 2026-11-28): 1 working day / 5 points — a date change counts from 1 day, a % complete change from 5 points; the answer says them — why: item 26 rule 7, "Analysis thresholds - agreed as long as it is visible" — arbitrary by agreement.
 export const DATE_MATERIAL_DAYS = 1;
-/** A percent complete change is material from this many points (the source's 5: changeTracking.ts:83, :138; the source's number, not yet agreed with the owner: ledger item 26). */
+/** A percent complete change is material from this many points (the source's 5: changeTracking.ts:83, :138; the source's number, agreed with the owner in item 26). */
 export const PROGRESS_MATERIAL_POINTS = 5;
 
 export type Category = 'baseline_dates' | 'actual_dates' | 'forecast_dates' | 'logic' | 'resources' | 'progress';

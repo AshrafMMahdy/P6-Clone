@@ -52,6 +52,7 @@ const write = (s) => { const b = Buffer.from(s + '\n', 'utf8'); for (let at = 0;
 const result = (out) => ({ content: [{ type: 'text', text: JSON.stringify(out) }], structuredContent: out, isError: false });
 const fallback = (id) => {
   const w = waiting.get(id); if (!w) return;
+  // AGREED LIMIT (owner, 2026-11-28): 400 ms / 1.5 s — job_status (server_status) is answered from the last posted state once the main thread has sent no heartbeat for this long; the answer says it is the last state — why: item 26 rule 5, "Timers, memory, and safety - agreed" — arbitrary by agreement.
   if (Date.now() - beat < 400) { w.timer = setTimeout(() => fallback(id), 150); return; }
   if (w.status) {
     // a server_status is answered from the posted state only in a real long step (no heartbeat for 1.5 s), and only
@@ -126,15 +127,18 @@ export function startStdio(): void {
   // the job's state as the front answers it while the main thread is busy
   onJobChange((id, view) => front.postMessage({ type: 'job', id, view: view && view.status === 'running' ? { ...view, started: Date.now() - (view.running_seconds ?? 0) * 1000 } : null }));
   onJobPulse((view) => send(jobNote(view)));
+  // AGREED LIMIT (owner, 2026-11-28): 100 ms heartbeat, status posted every 1 s — what the front thread answers from while the main thread is busy — why: item 26 rule 5, "Timers, memory, and safety - agreed" — arbitrary by agreement.
   setInterval(() => front.postMessage({ type: 'beat' }), 100).unref();
   // server_status as it is now, every second, for the front to answer from while a long step holds this thread
   setInterval(() => { void callTool('server_status', {}).then((r) => { if (!r.isError) front.postMessage({ type: 'status', view: r.out }); }, () => {}); }, 1000).unref();
   // at the end of stdin: calls still running finish first (up to 30 s), then the front writes every reply it holds,
   // and only then does the process stop (stopping at once lost replies still on their way to the front)
   let flushed: (() => void) | null = null;
+  // AGREED LIMIT (owner, 2026-11-28): 5 s — the replies are flushed for at most this long before the server exits — why: item 26 rule 5, "Timers, memory, and safety - agreed" — arbitrary by agreement.
   const stop = () => { const done = () => shutdown('stdin closed'); flushed = done; front.postMessage({ type: 'flush' }); setTimeout(done, 5000).unref(); };
   front.on('message', (x: { type: string; line?: string; lines?: string[] }) => {
     if (x.type === 'flushed') { flushed?.(); return; }
+    // AGREED LIMIT (owner, 2026-11-28): 30 s — when stdin closes, running calls get this long to finish before unsaved work is saved as a recovered file and the server exits — why: item 26 rule 5, "Timers, memory, and safety - agreed" — arbitrary by agreement.
     if (x.type === 'end') { const t0 = Date.now(); const wait = () => (running.size && Date.now() - t0 < 30000 ? setTimeout(wait, 50) : stop()); wait(); return; }
     handleLines(x.lines ?? [x.line ?? ''], send);
   });
@@ -157,5 +161,6 @@ function startStdioMain(): void {
     }
   });
   // calls still running finish first (up to 30 s), so their changes are in the save at exit
+  // AGREED LIMIT (owner, 2026-11-28): 30 s — when stdin closes, running calls get this long to finish before unsaved work is saved as a recovered file and the server exits — why: item 26 rule 5, "Timers, memory, and safety - agreed" — arbitrary by agreement.
   process.stdin.on('end', () => { const t0 = Date.now(); const wait = () => (running.size && Date.now() - t0 < 30000 ? setTimeout(wait, 50) : shutdown('stdin closed')); wait(); });
 }

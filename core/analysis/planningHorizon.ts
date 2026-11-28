@@ -20,6 +20,7 @@ export type Dim = 'logic' | 'resources' | 'float' | 'forecast_stability';
 export const WEIGHTS: Record<Dim, number> = { logic: 0.25, resources: 0.3, float: 0.1, forecast_stability: 0.15 };
 const DIMS = Object.keys(WEIGHTS) as Dim[];
 /** The windows: 0-30, 31-60 and 61-90 calendar days after the anchor (the source's 30 / 60 / 90 day bands, :92-96, :137-141). */
+// AGREED LIMIT (owner, 2026-11-28): the 0-30 / 31-60 / 61-90 day windows and the readiness scores and cut-offs below; the description and answer give them — why: item 26 rule 7, "Analysis thresholds - agreed as long as it is visible" — arbitrary by agreement (the method's numbers).
 export const BANDS = [{ name: '0-30 days', from: 0, to: 30 }, { name: '31-60 days', from: 31, to: 60 }, { name: '61-90 days', from: 61, to: 90 }] as const;
 /** Float below 5 working days costs readiness (score = float / 5 x 100; negative float 0). planningHorizon.ts:90, :285-291. */
 const MIN_FLOAT_DAYS = 5;

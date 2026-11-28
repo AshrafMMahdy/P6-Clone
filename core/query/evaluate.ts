@@ -12,7 +12,7 @@ import { isCritical, makeCtx } from '../project/ctx.ts';
 import { dayHours } from '../project/units.ts';
 import { calendarResolver, scheduleProjects, type SchedOptions } from '../schedule/cpm.ts';
 
-export interface EvaluateOptions { overrides?: unknown[]; options?: Partial<SchedOptions>; dataDate?: number; hoursPerDay?: number; maxRows?: number }
+export interface EvaluateOptions { overrides?: unknown[]; options?: Partial<SchedOptions>; dataDate?: number; hoursPerDay?: number }
 const FIELDS = ['start', 'finish', 'early_start', 'early_finish', 'late_start', 'late_finish', 'orig_days', 'rem_days', 'total_float_days', 'free_float_days', 'critical'] as const;
 type Snap = Record<(typeof FIELDS)[number], string | number | boolean | null>;
 
@@ -74,7 +74,7 @@ export function evaluate(db: Db, projIds: string[], o: EvaluateOptions = {}): Ev
     answer = {
       ok: true, data_date: iso(s.stats.dataDate), ...(Object.keys(s.projects).length > 1 && new Set(Object.values(s.projects).map((v) => v.dataDate)).size > 1 ? { data_dates: Object.fromEntries(Object.entries(s.projects).map(([id, v]) => [rows(d, 'PROJECT').find((p) => p.proj_id === id)?.proj_short_name ?? id, iso(v.dataDate)])) } : {}), base_finish: iso(base.stats.finish), finish: iso(s.stats.finish), finish_delta_days: delta,
       critical: [...ca], became_critical: [...ca].filter((c) => !cb.has(c)), no_longer_critical: [...cb].filter((c) => !ca.has(c)),
-      changed: changed.slice(0, o.maxRows ?? 500), changed_total: changed.length, loops: s.loops ?? [], notes: tidyNotes([...(() => { const own = Object.fromEntries(Object.entries(s.projects).map(([id, v]) => [rows(d, 'PROJECT').find((p) => p.proj_id === id)?.proj_short_name ?? id, iso(v.dataDate)])); const n = Object.keys(own).length > 1 ? differentDatesNote(own, 'each project\u2019s own date') : null; return n ? [n] : []; })(), ...(r.warnings ?? []), ...startedNote]),
+      changed, changed_total: changed.length, loops: s.loops ?? [], notes: tidyNotes([...(() => { const own = Object.fromEntries(Object.entries(s.projects).map(([id, v]) => [rows(d, 'PROJECT').find((p) => p.proj_id === id)?.proj_short_name ?? id, iso(v.dataDate)])); const n = Object.keys(own).length > 1 ? differentDatesNote(own, 'each project\u2019s own date') : null; return n ? [n] : []; })(), ...(r.warnings ?? []), ...startedNote]),
     };
   });
   rollback(j);

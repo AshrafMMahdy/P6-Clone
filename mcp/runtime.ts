@@ -179,6 +179,7 @@ function procStart(pid: number): string | null {
   try { const s = readFileSync(`/proc/${pid}/stat`, 'utf8'); return s.slice(s.lastIndexOf(')') + 2).split(' ')[19] ?? null; } catch { return null; }
 }
 type Run = (cmd: string, args: string[]) => string;
+// AGREED LIMIT (owner, 2026-11-28): 5 s — a system probe (PowerShell, then wmic) reading a recovery folder owner's start time; past it the owner is judged by its pid alone — why: item 26 rule 6, "Necessary limits - agreed" — necessary because a probe must not hang the server; 5 s arbitrary by agreement.
 const runCmd: Run = (cmd, args) => execFileSync(cmd, args, { encoding: 'utf8', timeout: 5000, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
 /** Windows: CreationDate of a process (the same string for its whole life; another process reusing the pid differs). */
 export function windowsStart(pid: number, run: Run = runCmd): string | null {
@@ -537,6 +538,7 @@ export function* unsavedEvicted(): Generator<{ handle: string; path: string | nu
 }
 export const isDirty = (h: string) => sessions.get(h)?.dirty ?? evicted.get(h)?.dirty ?? false;
 export function closeSession(s: Session): void {
+  // AGREED LIMIT (owner, 2026-11-28): 32 MB — a project this large gives its memory back to the system soon after it is closed — why: item 26 rule 5, "Timers, memory, and safety - agreed" — arbitrary by agreement.
   if (s.bytes >= 32 * 1048576) releaseSoon(); // (a big project's memory goes back to the system)
   sessions.delete(s.handle); clearTimeout(pendingCk.get(s.handle));
   for (const m of [evicted, checkpoints]) { const e = m.get(s.handle); if (e) { putAside(e.file, { handle: s.handle, path: s.savedTo ?? s.path, dirty: s.dirty, changedAt: s.changedAt ?? null }); m.delete(s.handle); } }
@@ -679,6 +681,7 @@ export function startJob(tool: string, handle: string | undefined, p: Promise<un
   // a progress pulse at the rhythm the server already reports progress at (notifications/progress, 250 ms): Monte Carlo moves
   // its text every iteration, and a pulse per iteration would flood the client; the end pulse is always sent
   let lastPulse = 0;
+  // AGREED LIMIT (owner, 2026-11-28): 250 ms — a job's progress pulses at most every 250 ms (the last one always) — why: item 26 rule 5, "Timers, memory, and safety - agreed" — arbitrary by agreement (it only paces the pulses).
   Object.defineProperty(job, 'progress', { enumerable: true, get: () => progress, set: (v: string | undefined) => { const changed = v !== progress; progress = v; jobHook?.(job.id, jobView(job)); const now = Date.now(); if (changed && now - lastPulse >= 250) { lastPulse = now; jobPulse?.(jobView(job)); } } });
   jobs.set(job.id, job);
   jobHook?.(job.id, jobView(job));

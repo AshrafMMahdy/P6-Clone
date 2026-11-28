@@ -2,13 +2,15 @@ import { writeFileSync } from 'node:fs';
 import type { Db } from '../core/db.ts';
 import { parseP6Date, formatP6Date } from '../core/dates.ts';
 import { scheduleProjects } from '../core/schedule/cpm.ts';
-import { NEW_XER_VERSION, writeXer } from '../core/xer/write.ts';
+import { NEW_XER_NOTE, NEW_XER_VERSION, writeXer } from '../core/xer/write.ts';
 import { p6xmlLossNotes, p6xmlLosses, writeP6Xml } from '../core/xml/p6xml.ts';
 import { syncAssignmentDates } from '../core/resource/assign.ts';
 
 /** Write the result: P6 XML when the path ends in .xml, else XER (the given version, the version read, or NEW_XER_VERSION, as the MCP save). */
 export function writeOut(path: string, db: Db, version?: string): void {
   if (/\.xml$/i.test(path)) for (const n of p6xmlLossNotes(p6xmlLosses(db))) console.error(n); // what P6 XML has no place for is said, never silent
+  if (/\.xml$/i.test(path) && version == null) console.error('Written as P6 XML version 19.12, the version given when none is asked (--version for another): a P6 older than 19.12 may refuse it.');
+  else if (!/\.xml$/i.test(path) && version == null && !db.header?.version) console.error(NEW_XER_NOTE);
   writeFileSync(path, /\.xml$/i.test(path) ? writeP6Xml(db, { version: version ?? '19.12' }) : writeXer(db, { version: version ?? db.header?.version ?? NEW_XER_VERSION, encoding: (process.argv.includes('--out-encoding') ? process.argv[process.argv.indexOf('--out-encoding') + 1] : 'auto') as never }));
 }
 

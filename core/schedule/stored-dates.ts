@@ -56,6 +56,7 @@ export function storedDatesState(db: Db, only?: string[]): { stale: StoredDatesS
     let differs = false;
     FIELDS.forEach(([f, label], k) => {
       const old = t[f], a = now ? now[k] : old;
+      // AGREED LIMIT (owner, 2026-11-28): 0.02 h — a saved duration or float within 0.02 h (about a minute) of what F9 gives counts as current — why: item 26 rule 7, "Analysis thresholds - agreed as long as it is visible" — arbitrary by agreement (a rounding of the saved hours is not a changed date).
       const same = f.endsWith('_cnt') ? Math.abs(Number(old || 0) - Number(a || 0)) < 0.02 : (old ?? '') === (a ?? '');
       if (same) return;
       if (!differs) st.examples.push({ severity: 'info', code: 'DATE_NOT_CURRENT', message: `${t0.task_code}: ${label} saved as ${old || '(blank)'}, F9 gives ${a || '(blank)'}.`, p6: '', table: 'TASK', key: t0.task_code, field: f });

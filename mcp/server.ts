@@ -558,7 +558,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
           return list.length ? { unreadable_rows: listedAnswer('unreadable_rows', { total: list.length, rows: list }, ['rows']) } : {};
         };
         const unreadableNote = () => { const u = unreadable().unreadable_rows; return [...(typeof side4d === 'object' ? [side4d.damaged] : []), ...(u ? [`${plural(u.total, 'line')} of the file ${u.total === 1 ? 'is' : 'are'} not loaded as ${u.total === 1 ? 'an activity' : 'activities'} (damaged, no Activity ID): rows ${namesText(u.rows.map((x: any) => String(x.row)))}; save with repair: true removes ${u.total === 1 ? 'it' : 'them'}.`] : [])]; };
-        // (a fact of the file a caller must not miss, so it is a field of its own: diagnostics.findings lists the first 40 findings only)
+        // (a fact of the file a caller must not miss, so it is a field of its own: diagnostics.findings lists the first 25 by the list rule)
         const noUid = f.some((x) => x.code === 'MPX_NO_UNIQUE_ID') ? { tasks_without_unique_id: true } : {};
         if (a.lenient !== true) return { handle: s0.handle, owner_key: s0.ownerKey, file: basename(path), format, diagnostics: brief(f), ...inSummary(s0, unreadableNote()), ...noUid, ...unreadable(), ...lob };
         // lenient: repair what can be repaired without guessing (key columns, ids), then judge the file again
@@ -591,7 +591,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
             : notRepaired(n === 1 ? xs[0].message : `${xs[0].message.replace(/\.$/, '')} (${n} of this kind)`, null));
         }
         // the file as given: said every time, so the answer to the user can say it (a repaired copy is not the user's file)
-        // (every fatal finding is listed here: diagnostics.findings shows the first 40 findings only)
+        // (every fatal finding is listed here: diagnostics.findings lists the first 25 by the list rule)
         const asGiven = fileAsGiven(f, '', { list: true, advice: false }); // (the next step of each fault is in the notes: not repaired)
         return {
           handle: s0.handle, owner_key: s0.ownerKey, file: basename(path), format, lenient: true, still_rejected: still, file_as_given: asGiven,
@@ -658,13 +658,14 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
       const { warnings: opWarnings, ...applied } = r as typeof r & { warnings?: string[] };
       const { stale, ...confirmed } = confirmChanges(s);
       const notes = tidyNotes([...(opWarnings ?? []), ...stale]);
-      return { ...applied, ...confirmed, ...(notes.length ? { notes } : {}) };
+      // each operation's result, by the list rule (item 26, rule 3): the first 25, results_total, the whole answer in a file
+      return listedAnswer('edit', { ...applied, ...confirmed, ...(notes.length ? { notes } : {}) }, ['results']);
     }
     case 'evaluate': {
       let options: ReturnType<typeof parseScheduleOptions> = {};
       if (a.options != null) { try { options = parseScheduleOptions(a.options, (m) => { throw new Error(m); }, s.hpd); } catch (e) { fail('bad_input', (e as Error).message, `Options: ${SCHEDULE_OPTIONS_GUIDE}.`); } }
       if (a.overrides != null && !Array.isArray(a.overrides)) fail('bad_input', `"overrides" must be a list of edit operations; received ${typeof a.overrides === 'object' ? `an object with the keys ${Object.keys(a.overrides).map((k) => `"${k}"`).join(', ') || '(none)'}` : `${typeof a.overrides} ${JSON.stringify(a.overrides)}`}.`, 'e.g. [{"op":"update_activity","id":"A1000","duration_days":15}]');
-      const ev = evaluate(s.db, a.project != null && a.project !== '' ? projectIds(s.db, a.project) : allIds(s.db), { overrides: a.overrides ?? [], options, dataDate: dd(a.data_date) ?? undefined, hoursPerDay: s.hpd, maxRows: Infinity });
+      const ev = evaluate(s.db, a.project != null && a.project !== '' ? projectIds(s.db, a.project) : allIds(s.db), { overrides: a.overrides ?? [], options, dataDate: dd(a.data_date) ?? undefined, hoursPerDay: s.hpd });
       if (!ev.ok) return ev;
       const evDates = dataDateUsedNotes(s.db.tables.PROJECT.rows.filter((p: Record<string, string>) => (a.project != null && a.project !== '' ? projectIds(s.db, a.project) : allIds(s.db)).includes(p.proj_id))); // (the data date the run used, when it is the planned start)
       if (evDates.length) ev.notes = [...evDates, ...(ev.notes ?? [])];
@@ -858,6 +859,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
         // (one run at a time on a kept file: a second is refused as run_busy, naming the job that holds it)
         const store = new IterationFile(a.resume ?? null, ctx.claim ?? claimHere(() => ctx.job?.id), ctx.keep ? (path) => ctx.keep!({ resume: path }) : undefined);
         const r = await runMonteCarlo(s.db, ids, { iterations, seed: countArg(a.seed, 'seed'), riskEvents: a.risk_events === 'post' || a.risk_events === 'off' ? a.risk_events : 'pre', signal: ctx.signal, ...mc, store, samples: true, ...(ctx.keep ? { onIteration: (f: number) => ctx.keep!(f) } : {}),
+          // AGREED LIMIT (owner, 2026-11-28): 250 ms — Monte Carlo progress at most every 250 ms (the last iteration always) — why: item 26 rule 5, "Timers, memory, and safety - agreed" — arbitrary by agreement.
           onProgress: (i) => { if (ctx.job) ctx.job.progress = `${i} of ${iterations} iterations`; const now = Date.now(); if (i === iterations || now - last > 250) { last = now; ctx.progress?.(i, iterations, `${i} of ${iterations} iterations`); } } }).finally(() => store.release());
         const wd = (x: number) => Math.round(x * 100) / 100;
         // the finishes counted in bins of width w from lo (the last bin takes the latest finish)
@@ -1065,10 +1067,11 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
         const g = importChecks(back.db, back.findings, fmt2);
         const still = worst(g) === 'fatal' || g.some((x) => x.code === 'EMPTY_KEY');
         const dateField = (f: string) => /_date$/.test(f), clearedDates = repairs.changes.some((c) => dateField(c.field) && c.new === ''), clearedActual = repairs.changes.some((c) => (c.field === 'act_start_date' || c.field === 'act_end_date') && c.new === '');
-        return { saved: path, format: label, repaired: true, changes: repairs.changes.map((c) => ({ table: c.table, row: c.row, key: c.key, field: c.field, old: c.old, new: c.new, reason: c.reason })), changes_total: repairs.changes.length,
+        // the repairs by the list rule (item 26, rule 3): the first 25 changes and invalid dates, their totals, the whole answer in a file
+        return listedAnswer('save', { saved: path, format: label, repaired: true, changes: repairs.changes.map((c) => ({ table: c.table, row: c.row, key: c.key, field: c.field, old: c.old, new: c.new, reason: c.reason })),
           // kept as the customer recorded them (P6 imports them), reported as DCMA's invalid dates
           invalid_dates: repairs.findings, check: { ...brief(g), still_rejected: still },
-          notes: [...notes, still ? `Repaired copy written, but P6 would still refuse it: ${namesText(g.filter((x) => x.severity === 'fatal' && x.omitted == null).map((x) => withoutAdvice(x.message).replace(/\.$/, '')))}.` : (repairs.changes.length ? `Repaired copy written: ${plural(repairs.changes.length, 'repair')} (changes lists them)` : 'Copy written: the file needed no repair') + `${clearedActual ? `; ${plural(repairs.changes.filter((c) => (c.field === 'act_start_date' || c.field === 'act_end_date') && c.new === '').length, 'actual date')} cleared: run schedule` : ''}.`] };
+          notes: [...notes, still ? `Repaired copy written, but P6 would still refuse it: ${namesText(g.filter((x) => x.severity === 'fatal' && x.omitted == null).map((x) => withoutAdvice(x.message).replace(/\.$/, '')))}.` : (repairs.changes.length ? `Repaired copy written: ${plural(repairs.changes.length, 'repair')} (changes lists them)` : 'Copy written: the file needed no repair') + `${clearedActual ? `; ${plural(repairs.changes.filter((c) => (c.field === 'act_start_date' || c.field === 'act_end_date') && c.new === '').length, 'actual date')} cleared: run schedule` : ''}.`] }, ['changes', 'invalid_dates']);
       }
       return { saved: path, format: label, ...(notes.length || p6found.length || stillFatal.length ? { notes: [...notes, ...(p6found.length || stillFatal.length ? [`${basename(path)} has ${plural(p6found.length + stillFatal.length, 'fault')} P6 refuses${s.openProblems ? ', already in the file when it was opened' : ''}: ${namesText([...p6found.map((x) => x.message), ...stillFatal].map((m) => withoutAdvice(m).replace(/\.$/, '')))}; save with repair: true fixes it.`] : [])] } : {}), ...(projIds ? { project: s.db.tables.PROJECT.rows.find((p) => p.proj_id === projIds[0])!.proj_short_name } : {}) };
     }
@@ -1396,6 +1399,7 @@ async function callToolRun(name: string, a: Record<string, any>, sessionCaller?:
   } catch (e0) {
     const e = asRefusal(e0) as Error;
     if (e instanceof ToolError) return { out: { error: keptNote(contractError({ code: e.code, message: e.message, hint: e.hint, ...(e.retryAfter ? { retry_after: e.retryAfter } : {}), ...(e.data ?? {}) }), handle) }, isError: true };
+    // AGREED LIMIT (owner, 2026-11-28): 4 lines — an internal error's detail carries the first 4 lines of the stack — why: item 26 rule 5, "Timers, memory, and safety - agreed" — arbitrary by agreement.
     return { out: { error: contractError({ code: 'internal', message: `Not done: the server failed (${(e as Error).message}); the project was not changed by this call.`, hint: 'Report it with this message.', detail: String((e as Error).stack ?? e).split('\n').slice(0, 4).join(' | ') }) }, isError: true };
   }
 }
@@ -1448,6 +1452,7 @@ export function saveUnsavedAtExit(reason: string): string[] {
   const stamp = new Date().toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15);
   const one = (handle: string, path: string | null, db: Db, readAs?: TextEncodingName) => {
     const first = (db.tables.PROJECT?.rows ?? []).find((p) => p.proj_id === allIds(db)[0])?.proj_short_name;
+    // AGREED LIMIT (owner, 2026-11-28): 80 characters — a recovered file's name (<name>.recovered-<stamp>.xer) — why: item 26 rule 6, "Necessary limits - agreed" — necessary because a path has a length limit on Windows; 80 arbitrary by agreement.
     const name = ((path ? basename(path).replace(/\.[^.]+$/, '') : '') || first || handle).replace(/[\\/:*?"<>|\u0000-\u001f]+/g, '-').replace(/^[.\s]+|[.\s]+$/g, '').slice(0, 80) || 'project';
     const dir = writeBase() ?? (path ? dirname(path) : safeCwd());
     let file = join(dir, `${name}.recovered-${stamp}.xer`);
@@ -1594,6 +1599,7 @@ if (isMain) {
   if (args.includes('--http')) {
     config.requireOwnerKey = !args.includes('--no-owner-key');
     // not awaited: http/stdio import this module, so it must finish evaluating first
+    // AGREED LIMIT (owner, 2026-11-28): port 8765, host 127.0.0.1 — the HTTP mode's address when none is given — why: item 26 rule 4, "Defaults - agreed" — arbitrary by agreement (loopback is the safe default).
     void import('./http.ts').then(({ startHttp }) => startHttp({ port: Number(opt('port') ?? process.env.P6CLONE_PORT ?? 8765), host: opt('host') ?? '127.0.0.1', token: opt('token') ?? process.env.P6CLONE_TOKEN ?? null }));
   } else {
     config.requireOwnerKey = args.includes('--require-owner-key');
