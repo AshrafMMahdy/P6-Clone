@@ -103,8 +103,7 @@ test('MCP: count arguments are whole numbers: a value that is not one is refused
     await refused('float_paths', 'count', v);
     await refused('optimize_schedule', 'max_changes', v);
     await refused('optimize_schedule', 'samples', v);
-    await refused('transfer_progress', 'max_changes', v, { path: 'none.xer' });
-    await refused('transfer_progress', 'offset', v, { path: 'none.xer' });
+    // (transfer_progress has no max_changes or offset any more: every list shows its first 25 with its total and a file, item 26)
   }
   // every check lists at most 25 activities, whatever max_ids says, and total_activities says how many there are
   const dflt = await call('check_schedule', { handle: h });

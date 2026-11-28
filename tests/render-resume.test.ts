@@ -730,7 +730,7 @@ test('a resume while a cancelled job is still stopping is refused as render_busy
       assert.equal(busy.d.error.job_id, job);
     }
     assert.equal(readFileSync(manifest, 'utf8'), before, 'the refused calls touched nothing');
-    view = (await call('job_status', { job_id: job, wait_seconds: 30 })).d;
+    for (let i = 0; i < 3 && (!view || view.status === 'running'); i++) view = (await call('job_status', { job_id: job, wait_seconds: 20 })).d; // (job_status waits at most 20 s: item 26)
   } finally { back(); }
   assert.equal(view.status, 'cancelled', JSON.stringify(view).slice(0, 300));
   const done = await call('render_4d', { ...args, handle: second.h, resume: view.result.resume });
@@ -748,7 +748,8 @@ test('an error after frames were kept (a manifest that cannot be written) carrie
   const recorded = () => { try { return JSON.parse(readFileSync(manifest, 'utf8')).segments.reduce((n: number, s: any) => n + s.frames, 0); } catch { return 0; } };
   for (let k = 0; k < 6000 && recorded() < 1; k++) await new Promise((r) => setTimeout(r, 10));
   chmodSync(manifest, 0o444); // the next write of render.json is refused (Windows: the file is read-only)
-  const view = (await call('job_status', { job_id: job, wait_seconds: 60 })).d;
+  let view: any;
+  for (let i = 0; i < 3 && (!view || view.status === 'running'); i++) view = (await call('job_status', { job_id: job, wait_seconds: 20 })).d; // (job_status waits at most 20 s: item 26)
   if (existsSync(manifest)) chmodSync(manifest, 0o666); // (a render that finished removed it)
   if (process.platform !== 'win32' && view.status === 'done') return; // (a POSIX rename over a read-only file succeeds: nothing to refuse there)
   assert.equal(view.status, 'failed', JSON.stringify(view).slice(0, 400));
@@ -960,7 +961,7 @@ test('an encoder whose new run still differs from the reference refuses the join
     const total = JSON.parse(readFileSync(manifest, 'utf8')).frames_total;
     for (let k = 0; k < 900 && frames() < total; k++) await new Promise((r) => setTimeout(r, 100));
     await call('cancel_job', { job_id: job });
-    view = (await call('job_status', { job_id: job, wait_seconds: 30 })).d;
+    for (let i = 0; i < 3 && (!view || view.status === 'running'); i++) view = (await call('job_status', { job_id: job, wait_seconds: 20 })).d; // (job_status waits at most 20 s: item 26)
   } finally { b2(); }
   assert.equal(view.status, 'cancelled', JSON.stringify(view).slice(0, 300));
   const mf = JSON.parse(readFileSync(manifest, 'utf8'));

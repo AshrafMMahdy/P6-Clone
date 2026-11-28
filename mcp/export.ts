@@ -208,7 +208,6 @@ function writeExport(tool: string, arg: unknown, full: unknown, tables: Table[],
  *  CUT_LISTS), and the table of the export that holds it whole (table: default the list's name). */
 export interface CutList { list: string; total: string; table?: string; /** the export holds only the list as listed (float_paths between.max: the paths are never all made) */ listedOnly?: true;
   /** the table has more rows than the list has items, because it has one row per this (evaluate: per changed field): the note says so, with the table's row count */ rowsAre?: string;
-  /** the list is a page the caller asked for (compare: max_changes, offset): the note says from where */ paged?: true;
   /** only the list of this name inside the object under this key (planning_horizon: the activities of a systemic issue, not those of a window) */ within?: string }
 /** The cut lists whose names do not follow `<list>_total`, by tool. */
 export const CUT_LISTS: Record<string, CutList[]> = {
@@ -218,7 +217,7 @@ export const CUT_LISTS: Record<string, CutList[]> = {
   decm: [{ list: 'activities', total: 'total_activities', table: 'failing_activities' }],
   evaluate: [{ list: 'changed', total: 'changed_total', table: 'changed', rowsAre: 'changed field of an activity' }],
   evaluate_batch: [{ list: 'changed', total: 'changed_total', table: 'dates_moved' }],
-  compare: [{ list: 'changes', total: 'changes_total', table: 'changes', paged: true }],
+  compare: [{ list: 'changes', total: 'changes_total', table: 'changes' }],
   float_paths: [{ list: 'paths', total: 'paths_total', table: 'between', listedOnly: true }],
   schedule_index: [{ list: 'activities', total: 'activities_total', table: 'logic_findings' }],
   planning_horizon: [{ list: 'activities', total: 'activities_total', table: 'systemic_activities', within: 'systemic_issues' }],

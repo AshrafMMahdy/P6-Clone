@@ -79,18 +79,15 @@ test('compare {model}: what changed between the attached model and a revision â€
   assert.ok(Object.keys(whole.by_class).length > Object.keys(c.d.by_class).length, 'and every class, moved or not');
   const noDoors = await call('compare', { handle: h, model: rev, class: 'IfcDoor', export: join(out, 'doors') });
   assert.equal(noDoors.d.changes.length, 0);
-  // a page
-  const page = await call('compare', { handle: h, model: rev, max_changes: 1, export: join(out, 'page') });
-  assert.equal(files(page).find((f) => /changes\.csv$/.test(f.path))!.rows, 2, 'a page of the answer, the whole list in the file');
-  assert.equal(page.d.changes.length, 1);
-  assert.equal(page.d.changes_total, 2);
-  assert.equal(page.d.next_offset, 1);
+  // no pages (item 26): the answer lists the first 25 with changes_total when there are more, the files hold every change
+  const all = await call('compare', { handle: h, model: rev, export: join(out, 'all') });
+  assert.equal(files(all).find((f) => /changes\.csv$/.test(f.path))!.rows, 2, 'the whole list in the file');
+  assert.equal(all.d.changes.length, 2); assert.equal(all.d.next_offset, undefined);
   // what is refused, in words, before any model is read
   const refused = async (args: Record<string, unknown>, code: string, words: RegExp) => { const r = await call('compare', { handle: h, export: join(out, 'refused'), ...args }); assert.equal(r.err, true, JSON.stringify(args)); assert.equal(r.d.error.code, code, JSON.stringify(r.d.error)); assert.match(String(r.d.error.message), words); };
   await refused({ model: rev, mode: 'computed' }, 'bad_input', /model compares the 3D model/);
   await refused({ model: rev, kind: 'moved' }, 'bad_input', /kind must be one of added, removed, modified, reidentified/);
   await refused({ model: rev, tolerance_m: 0 }, 'bad_input', /tolerance_m must be a length in metres above 0/);
-  await refused({ model: rev, max_changes: -1 }, 'bad_input', /max_changes/);
   await refused({ model: join(out, 'nowhere.ifc') }, 'model_unreadable', /No file at .*nowhere\.ifc/);
   assert.ok(!existsSync(join(out, 'refused', 'compare_model.json')), 'a refused call writes nothing');
   // the attached model is not touched by a comparison

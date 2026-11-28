@@ -78,9 +78,10 @@ test('save writes P6 XML and MSPDI that open again; lists page with offset / nex
   if (c1.d.total > 5) { assert.equal(c1.d.next_offset, 5); const c2 = await call('critical_path', { handle, limit: 5, offset: 5 }); assert.notEqual(c2.d.activities[0].id, c1.d.activities[0].id); }
   const w = await call('list_wbs', { handle, depth: 6 });
   assert.equal(w.d.total >= w.d.wbs.length, true);
-  // compare pages its changes
-  const cmp = await call('compare', { handle, path: FIX, max_changes: 1 });
+  // compare lists the first 25 changes with their total (item 26)
+  const cmp = await call('compare', { handle, path: FIX });
   assert.equal(cmp.err, false, JSON.stringify(cmp.d));
+  assert.ok(cmp.d.changes.length <= 25 && (cmp.d.changes_total == null || cmp.d.changes_total > 25));
   await call('close', { handle, owner_key, discard: true });
 });
 

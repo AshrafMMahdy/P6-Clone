@@ -38,7 +38,7 @@ test('12: an actual finish (and start) later than the data date is reported, com
 
 test('12 on the sample: 130 TRIAL names BTAB77 (actual finish 2010-12-30, data date 2010-11-10)', async () => {
   const o = await call('open_file', { path: sampleCopy('130 TRIAL.xer'), lenient: true });
-  const s = await call('schedule', { handle: o.handle, log_max_ids: 0 });
+  const s = await call('schedule', { handle: o.handle });
   const sec = s.log.warnings.find((x: any) => x.code === 'ACTUAL_AFTER_DD');
   const a = sec.activities.find((x: any) => x.id === 'BTAB77');
   assert.match(a.detail, /^BTAB77 has an actual finish 2010-12-30 \d\d:\d\d after the data date 2010-11-10/);

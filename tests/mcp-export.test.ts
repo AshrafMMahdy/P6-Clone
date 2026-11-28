@@ -275,13 +275,13 @@ test('crash_schedule, float_paths, progress_curves, resource_histogram, tia, lev
   f = files(ev, 'evaluate');
   assert.equal(f.json.changed.length, ev.changed_total);
   assert.equal(f.csv.changed.length, f.json.changed.reduce((s: number, x: any) => s + Object.values(x).filter(Array.isArray).length, 0));
-  // compare against the baseline: the answer pages the changes, the export has them all
+  // compare against the baseline: the answer lists the first 25 changes (item 26), the export has them all
   await call('edit', { ...h, operations: [{ op: 'save_baseline', name: 'Plan', assign_as: 'project' }, { op: 'update_activity', id: 'A0', duration_days: 6 }] });
   await call('schedule', h);
-  const cmp = (await call('compare', { handle: h.handle, baseline: 'project', max_changes: 1, export: folder() })).d;
-  assert.equal(cmp.changes.length, 1); assert.ok(cmp.changed > 1 && cmp.truncated);
+  const cmp = (await call('compare', { handle: h.handle, baseline: 'project', export: folder() })).d;
+  assert.equal(cmp.changes.length, Math.min(25, cmp.changed)); assert.ok(cmp.changed > 1);
   f = files(cmp, 'compare');
-  assert.equal(f.csv.changes.length, cmp.changed); assert.equal(f.json.changes.length, cmp.changed); assert.equal(f.json.truncated, false);
+  assert.equal(f.csv.changes.length, cmp.changed); assert.equal(f.json.changes.length, cmp.changed);
   await call('close', { ...h, discard: true });
   // review: 25 examples per check (examples_total says how many), the export every one
   const k = (await call('open_file', { path: sampleCopy('cairo festival city.xer') })).d.handle;
