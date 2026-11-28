@@ -23,7 +23,10 @@ export const daysText = (days: number): string => `${days} ${Math.abs(days) === 
 export const hoursAsDays = (hours: number, hoursPerDay: number): string => daysText(Math.round((hours / (hoursPerDay || 8)) * 100) / 100);
 
 // AGREED LIMIT (owner, 2026-11-12): 25 — activities and fixes an analysis answer lists per check, and per ranked list of the Monte Carlo answer (criticality, sensitivity, milestones) — fixed, no agent argument — why: enough examples to see the pattern; a round number with no calculation behind it; harmless because the full lists are always written to the result file and named in the answer — arbitrary by agreement.
-// The same constant is also the list size of: the activities and fixes per check of lint, dcma_14 and check_schedule; the resources resource_histogram lists; the changed activities of evaluate and evaluate_batch; the activities per window of windows_analysis; the worst lists of earned_value; the Monte Carlo S-curve points and ranked lists; the activity names in crash_schedule's notes.
+// AGREED LIMIT (owner, 2026-11-28, item 26 rule 3 "Lists inside Answers, Agreed"): the same 25, with the total and every item in a file, for EVERY list
+// an answer of this server gives inside a result (findings, changes, notes, examples, unmatched rows, critical lists, curve points, names in a
+// sentence); a READING tool (activity_table, read_table, find_activities and the other lookups, run_report) returns what is asked instead, and
+// the answer-size rule (mcp/answerCap.ts) keeps a very long answer whole in a file — arbitrary by agreement.
 export const LISTED = 25;
 /** Names in a sentence (a refusal, a reason) by the list rule: the first LISTED, then how many more and the total. Short lists are given whole. */
 export const namesText = (names: string[]): string => (names.length > LISTED ? `${names.slice(0, LISTED).join(', ')} and ${names.length - LISTED} more (${names.length} in total)` : names.join(', '));

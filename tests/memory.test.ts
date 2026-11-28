@@ -85,7 +85,7 @@ test('server: a call leaves nothing behind (the soft-timeout timer held every an
   const st = (toolResult((await callTool('server_status', {})).out, false).structuredContent as any).memory;
   for (const k of ['heap_total_mb', 'external_mb', 'array_buffers_mb']) assert.equal(typeof st[k], 'number', k);
   // a page: the rows in structuredContent, and in the text part as COMPACT JSON (the MCP spec's serialized result; a text-only client must not lose the rows) - never pretty-printed
-  const x = await callTool('read_table', { handle: h, table: 'TASK', limit: 500 });
+  const x = await callTool('read_table', { handle: h, table: 'TASK', limit: 500, columns: ['task_code', 'task_name'] }); // (two columns: a page under the answer-size rule)
   const r = toolResult(x.out, x.isError, 'read_table');
   const rows = (r.structuredContent as any).rows.length;
   assert.equal(rows, 500);

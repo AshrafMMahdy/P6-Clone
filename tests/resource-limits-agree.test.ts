@@ -5,6 +5,9 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { callTool, toolResult } from '../mcp/server.ts';
 import { sampleCopy, testRoots } from './helpers.ts';
+import { config } from '../mcp/runtime.ts';
+// (these tests read the tools' whole notes; the answer-size rule has its own tests: analysis-listed, notes-b, large-files)
+config.maxResponseChars = Number.MAX_SAFE_INTEGER;
 
 testRoots();
 const call = async (name: string, args: Record<string, unknown>) => { const r = await callTool(name, args); return toolResult(r.out, r.isError, name).structuredContent as any; };

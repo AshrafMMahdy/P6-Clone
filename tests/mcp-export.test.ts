@@ -9,7 +9,9 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { setRoots } from '../mcp/runtime.ts';
+import { config, setRoots } from '../mcp/runtime.ts';
+// (these tests read the tools' whole answers; the answer-size rule has its own tests: analysis-listed, notes-b, large-files)
+config.maxResponseChars = Number.MAX_SAFE_INTEGER;
 import { testHooks } from '../core/risk/montecarlo.ts';
 import { percentile } from '../core/risk/montecarlo.ts';
 import { formatP6Date, parseP6Date } from '../core/dates.ts';

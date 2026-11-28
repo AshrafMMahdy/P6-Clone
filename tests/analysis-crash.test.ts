@@ -310,7 +310,7 @@ test('MCP crash_schedule: cancelled mid-crashing it answers the steps done, appl
   for (const max_steps of [-1, 2.5, Number.NaN, Infinity, '3', true]) {
     const bad = await call('crash_schedule', { handle: np.handle, target_days: 5, max_steps });
     assert.equal(bad.d.error?.code, 'bad_input', `max_steps ${String(max_steps)}`);
-    assert.match(bad.d.error.message, /^max_steps must be a whole number of 0 or more/);
+    assert.match(bad.d.error.message, /^(crash_schedule: )?max_steps must be a (whole number of 0 or more|number \(not in quotes\))/);
   }
   assert.equal((await call('crash_schedule', { handle: np.handle, target_days: 5, max_steps: 0 })).d.stop, 'CAP');
 });

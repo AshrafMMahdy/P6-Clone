@@ -162,7 +162,7 @@ test('.mpp through the MCP (MPXJ): opened without Microsoft Project, every eleme
 test('the clone’s own data is readable too (clone:<field>, CLONE:<TABLE>); get_activity and trace_logic take many activities in one call; lookups have no page cap', { timeout: 300_000 }, async () => {
   const { callTool, toolResult } = await import('../mcp/server.ts');
   // an answer too large for one reply is written whole to a JSON file the reply names: read from there
-  const call = async (name: string, args: Record<string, unknown>) => { const r = await callTool(name, args); const d = toolResult(r.out, r.isError).structuredContent as any; return { err: r.isError, d: d.saved ? JSON.parse(readFileSync(d.saved, 'utf8')) : d }; };
+  const call = async (name: string, args: Record<string, unknown>) => { const r = await callTool(name, args); const d = toolResult(r.out, r.isError).structuredContent as any; return { err: r.isError, d: d.result_truncated?.full_result_path ? JSON.parse(readFileSync(d.result_truncated.full_result_path, 'utf8')) : d }; };
   const o = await call('open_file', { path: join(SAMPLES_DIR, 'CfC.xer') });
   const H = { handle: o.d.handle };
   assert.equal((await call('edit', { ...H, owner_key: o.d.owner_key, operations: [{ op: 'save_baseline', name: 'BL-C' }] })).err, false);
@@ -177,9 +177,9 @@ test('the clone’s own data is readable too (clone:<field>, CLONE:<TABLE>); get
   assert.deepEqual(many.not_found, ['NOPE-1']);
   const one = (await call('get_activity', { ...H, activity_id: all[5] })).d;
   assert.deepEqual(many.activities[5].predecessors, one.predecessors);
-  const tr = (await call('trace_logic', { ...H, activity_ids: all.slice(0, 20), max_per_level: 0 })).d;
+  const tr = (await call('trace_logic', { ...H, activity_ids: all.slice(0, 20) })).d;
   assert.equal(tr.traces.length, 20);
-  const found = (await call('find_activities', { ...H, limit: 100000 })).d;
+  const found = (await call('find_activities', { ...H })).d; // (every match by default, item 26)
   assert.equal(found.activities.length, found.total_matches);
   assert.equal(found.next_offset, null);
   await call('close', { ...H, owner_key: o.d.owner_key, discard: true });

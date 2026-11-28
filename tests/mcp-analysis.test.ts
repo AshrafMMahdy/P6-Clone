@@ -96,7 +96,8 @@ test('MCP: count arguments are whole numbers: a value that is not one is refused
   const refused = async (tool: string, arg: string, v: unknown, extra: Record<string, unknown> = {}) => {
     const r = await call(tool, { handle: h, ...extra, [arg]: v });
     assert.equal(r.d.error?.code, 'bad_input', `${tool} ${arg} ${String(v)}: ${JSON.stringify(r.d).slice(0, 160)}`);
-    assert.match(r.d.error.message, new RegExp(`^${arg} must be a whole number of 0 or more`), r.d.error.message);
+    // (a value of another type — a text, true, a list — is refused by the server's type check, item 26; a number that is not whole by the tool)
+    assert.match(r.d.error.message, new RegExp(`^(${tool}: )?${arg} must be a (whole number of 0 or more|number \\(not in quotes\\))`), r.d.error.message);
   };
   for (const v of bads) {
     await refused('float_paths', 'count', v);
@@ -109,8 +110,9 @@ test('MCP: count arguments are whole numbers: a value that is not one is refused
   const dflt = await call('check_schedule', { handle: h });
   assert.equal(dflt.err, false);
   assert.ok(dflt.d.checks.every((c: any) => c.activities.length <= 25 && c.activities.length === Math.min(25, c.total_activities)));
-  // samples is parsed only where it is used: min_crash_cost does not sample, so a bad samples does not refuse a crash run
-  for (const v of [-1, 2.5, '5']) {
+  // samples is parsed only where it is used: min_crash_cost does not sample, so a bad samples NUMBER does not refuse a crash run (a text is
+  // refused whatever the objective: the type check, item 26)
+  for (const v of [-1, 2.5]) {
     const crash = await call('optimize_schedule', { handle: h, objective: 'min_crash_cost', target_days: 5, samples: v });
     assert.equal(crash.err, false, `samples ${String(v)}: ${JSON.stringify(crash.d).slice(0, 200)}`);
     assert.equal(crash.d.objective, 'min_crash_cost'); assert.ok(crash.d.stop, JSON.stringify(crash.d).slice(0, 200));

@@ -429,14 +429,16 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
   for (const [k, def] of Object.entries(props)) {
     const v = a[k], ty = def?.type;
     if (v == null || v === '' || typeof ty !== 'string') continue;
-    const ok = ty === 'number' || ty === 'integer' ? typeof v === 'number' && Number.isFinite(v) && (ty === 'number' || Number.isInteger(v))
+    // (a number that is not whole, negative or out of range is the tool's own parser's to refuse, with its own words: countArg)
+    const ok = ty === 'number' || ty === 'integer' ? typeof v === 'number'
       : ty === 'boolean' ? typeof v === 'boolean' : ty === 'string' ? typeof v === 'string'
       : ty === 'array' ? Array.isArray(v) : ty === 'object' ? typeof v === 'object' && !Array.isArray(v) : true;
     if (ok) continue;
     const got = typeof v === 'string' ? `the text ${JSON.stringify(v)}` : Array.isArray(v) ? 'a list' : typeof v === 'number' ? `the number ${v}` : typeof v === 'boolean' ? String(v)
       : typeof v === 'object' ? `an object with the keys ${Object.keys(v as object).slice(0, 5).map((x) => JSON.stringify(x)).join(', ') || '(none)'}` : typeof v;
     const as = ty === 'number' ? 'a number (not in quotes)' : ty === 'integer' ? 'a whole number (not in quotes)' : ty === 'boolean' ? 'true or false (not in quotes)' : ty === 'string' ? 'text, in quotes' : ty === 'array' ? 'a list' : 'an object';
-    fail('bad_input', `${name}: ${k} must be ${as}; got ${got}.`, `Send ${k} as ${as}, or leave it out. Nothing was run.`);
+    const what = typeof (def as { description?: unknown }).description === 'string' ? ` (${k}: ${(def as { description: string }).description})` : '';
+    fail('bad_input', `${name}: ${k} must be ${as}; got ${got}.`, `Send ${k} as ${as}${what}, or leave it out. Nothing was run.`);
   }
   for (const [k, def] of Object.entries(props)) {
     if (!Array.isArray(def?.enum) || a[k] == null || a[k] === '' || def.enum.includes(a[k])) continue;
@@ -1196,7 +1198,7 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
   if (lobbed !== undefined) { regrow(s); return lobbed; }
   if (LOOKUPS.some((t) => t.name === name)) {
     const { handle: _h, caller: _c, async: _a, export: _x, export_name: _n, ...args } = a;
-    const answer = runTool(name, name === 'earned_value' ? { ...args, worst: LISTED } : args, s.db, makeCtx(s.db, { hoursPerDay: s.hpd }), [], s.hpd, true);
+    const answer = runTool(name, args, s.db, makeCtx(s.db, { hoursPerDay: s.hpd }), [], s.hpd, true);
     if (name === 'schedule_health' && a.export != null && !(answer as { error?: unknown }).error) {
       const full = runTool(name, { ...args, every_example: true }, s.db, makeCtx(s.db, { hoursPerDay: s.hpd }), [], s.hpd, true) as Record<string, { count?: number; examples?: string[] }>;
       const lists = Object.entries(full).filter(([, v]) => v && typeof v === 'object' && Array.isArray((v as { examples?: unknown }).examples));

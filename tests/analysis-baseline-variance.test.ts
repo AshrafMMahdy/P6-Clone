@@ -338,7 +338,9 @@ test('baseline_variance through the server: arguments, refusals in words, respon
   assert.match(bad.d.error.message, /No baseline "bl2" for this project\./);
   const both = await call('baseline_variance', { handle: trial, baseline: 'project', as_planned: { path: sampleCopy('130 TRIAL.xer') } });
   assert.match(both.d.error.message, /Pass baseline or as_planned, not both/);
-  for (const shape of [{}, { handle: 'a', path: 'b' }, 'x', []]) assert.match((await call('baseline_variance', { handle: trial, as_planned: shape })).d.error.message, /as_planned must be \{"handle": \.\.\.\} or \{"path": \.\.\.\}/);
+  for (const shape of [{}, { handle: 'a', path: 'b' }]) assert.match((await call('baseline_variance', { handle: trial, as_planned: shape })).d.error.message, /as_planned must be \{"handle": \.\.\.\} or \{"path": \.\.\.\}/);
+  // (not an object at all: refused by the server's type check, item 26, which quotes the argument's description)
+  for (const shape of ['x', []]) { const e = (await call('baseline_variance', { handle: trial, as_planned: shape })).d.error; assert.match(e.message, /^baseline_variance: as_planned must be an object; got /); }
   // responsibility_code: unknown -> the file's code types named; given -> the table
   const tw = await openSample('Tower-A.xer');
   const unk = await call('baseline_variance', { handle: tw, baseline: 'TOWER-A-BL1', responsibility_code: 'Responsibilty' });
