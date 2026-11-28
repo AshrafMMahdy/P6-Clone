@@ -210,6 +210,15 @@ export interface CutList { list: string; total: string; table?: string; /** the 
   /** the table has more rows than the list has items, because it has one row per this (evaluate: per changed field): the note says so, with the table's row count */ rowsAre?: string;
   /** only the list of this name inside the object under this key (planning_horizon: the activities of a systemic issue, not those of a window) */ within?: string }
 /** The cut lists whose names do not follow `<list>_total`, by tool. */
+/** Item 26, rule 3: the lists these result-file tools returned whole, cut to the first LISTED with <list>_total (server.ts cutListed; noteCuts
+ *  then names the result file that holds them). */
+export const LIST_KEYS: Record<string, readonly string[]> = {
+  evaluate: ['became_critical', 'no_longer_critical', 'critical'],
+  evaluate_batch: ['became_critical', 'no_longer_critical'],
+  tia: ['fragnet_path', 'became_critical', 'no_longer_critical'],
+  float_paths: ['activities', 'near_critical'],
+  monte_carlo: ['risk_events', 'events'],
+};
 export const CUT_LISTS: Record<string, CutList[]> = {
   lint: [{ list: 'activities', total: 'total_activities', table: 'findings' }],
   check_schedule: [{ list: 'activities', total: 'total_activities', table: 'failing_activities' }],

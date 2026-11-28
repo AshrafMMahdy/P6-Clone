@@ -13,6 +13,8 @@ export interface Finding {
   field?: string;
   /** On the validator's "…and N more" line only: how many findings of that kind it stands for (past the ones kept). */
   omitted?: number;
+  /** On that line too: the findings of that kind past the ones kept, so a file can hold every finding (item 26, rule 3). */
+  hidden?: Finding[];
 }
 /** How many findings a line stands for: itself, or on a summary line the ones it stands for. */
 export const findingCount = (f: Finding): number => f.omitted ?? 1;

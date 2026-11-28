@@ -28,6 +28,8 @@ export const hoursAsDays = (hours: number, hoursPerDay: number): string => daysT
 // sentence); a READING tool (activity_table, read_table, find_activities and the other lookups, run_report) returns what is asked instead, and
 // the answer-size rule (mcp/answerCap.ts) keeps a very long answer whole in a file — arbitrary by agreement.
 export const LISTED = 25;
+/** `n` items spread evenly over `list`, the first and the last always among them (a curve's points: its shape, not its first part). */
+export const evenly = <T,>(list: T[], n: number): T[] => (list.length <= n ? list : Array.from({ length: n }, (_, i) => list[Math.round((i * (list.length - 1)) / (n - 1))]));
 /** Names in a sentence (a refusal, a reason) by the list rule: the first LISTED, then how many more and the total. Short lists are given whole. */
 export const namesText = (names: string[]): string => (names.length > LISTED ? `${names.slice(0, LISTED).join(', ')} and ${names.length - LISTED} more (${names.length} in total)` : names.join(', '));
 

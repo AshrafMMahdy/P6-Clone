@@ -1,7 +1,7 @@
 // Schedule analysis tools of the MCP server (kept apart from server.ts so the two grow without stepping on each other):
 // P6 Check Schedule and DCMA 14-point; later lint, float paths, curves, what-ifs, crashing and delay analysis.
 import { dayHours } from '../core/project/units.ts';
-import { cancelledAfter, datesNotCurrent, noResourceAssigned, notJudgedNotes } from '../core/notes.ts';
+import { cancelledAfter, datesNotCurrent, evenly, noResourceAssigned, notJudgedNotes } from '../core/notes.ts';
 import { storedDatesState } from '../core/schedule/stored-dates.ts';
 import { notJudged } from '../core/resource/usage.ts';
 import { CurvesRefused, progressCurves, resourceHistograms } from '../core/analysis/curves.ts';
@@ -240,7 +240,9 @@ export async function runAnalysis(name: string, a: Record<string, any>, s: Sessi
       if (units !== 'cost' && units !== 'hours' && units !== 'duration') fail('bad_input', 'units must be cost, hours or duration.', 'Use cost, hours or duration (duration needs neither costs nor resource units).');
       let r: ReturnType<typeof progressCurves>;
       try { r = progressCurves(s.db, projIds, { period, units, from: h.dd(a.from) ?? undefined, to: h.dd(a.to) ?? undefined }); } catch (e) { if (e instanceof CurvesRefused) return fail('bad_input', e.message, e.next); throw e; }
-      return exported(r, r, [
+      // (item 26, rule 3: the answer gives 25 of the periods spread evenly from the first to the last — the curve's shape — with periods_total; the file holds every period)
+      const shown = config.screens || r.periods.length <= LISTED ? r : { ...r, periods: evenly(r.periods, LISTED), periods_total: r.periods.length, periods_shown: 'spread evenly from the first period to the last' };
+      return exported(shown, r, [
         { name: 'periods', columns: ['start', 'end', 'pv', 'ev', 'ac', 'remaining_early', 'remaining_late', 'cum_pv', 'cum_ev', 'cum_ac', 'cum_forecast_early', 'cum_forecast_late', 'spi', 'cpi', 'cum_spi', 'cum_cpi'], rows: r.periods },
         { name: 'totals', columns: ['units', 'data_date', 'bac', 'pv', 'ev', 'ac', 'etc', 'eac', 'vac', 'spi', 'cpi', 'tcpi', 'es', 'at', 'pd', 'spi_t', 'sv_t', 'es_date', 'es_days', 'at_days', 'sv_t_days'], rows: [{ units: r.units, data_date: r.data_date, ...r.totals }] },
       ]);

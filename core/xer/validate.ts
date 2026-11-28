@@ -73,6 +73,9 @@ export function loopGroups(db: Db, only?: string[], loops = projectLoops(db)): L
 }
 
 const KNOWN_VERSION = /^(3\.5|4\.[01]|5\.0(\.\d+)?|6\.[0-2](\.\d+)?|7\.0(\.\d+)?|8\.[1-4](\.\d+)?|1[5-9]\.\d+|2[0-6]\.\d+)$/;
+// AGREED LIMIT (owner, 2026-11-28, item 26 rules 3 and 5): 5 — the findings of one kind an answer shows before the rest of that kind is folded into
+// one line that counts them — why: every kind stays in view when one kind repeats on thousands of rows; every finding is kept (`hidden`) and
+// written to the findings file the answer names — arbitrary by agreement.
 const PER_KIND_CAP = 5;
 /** Column sizes in the P6 database (characters). */
 export const MAX_LEN: Record<string, number> = { 'TASK.task_code': 40, 'TASK.task_name': 120, 'PROJWBS.wbs_short_name': 40, 'PROJWBS.wbs_name': 100, 'PROJECT.proj_short_name': 40 };
@@ -114,17 +117,19 @@ export function suggest(name: string, candidates: Iterable<string>): string | un
 class Collector {
   out: Finding[] = [];
   private counts = new Map<string, number>();
+  private past = new Map<string, Finding[]>();
   add(f: Finding): void {
     const k = `${f.code}|${f.table ?? ''}|${f.field ?? ''}`;
     const n = (this.counts.get(k) ?? 0) + 1;
     this.counts.set(k, n);
     if (n <= PER_KIND_CAP) this.out.push(f);
+    else { const l = this.past.get(k); if (l) l.push(f); else this.past.set(k, [f]); }
   }
   finish(): Finding[] {
     for (const [k, n] of this.counts) {
       if (n <= PER_KIND_CAP) continue;
       const first = this.out.find((f) => `${f.code}|${f.table ?? ''}|${f.field ?? ''}` === k)!;
-      this.out.push({ ...first, row: undefined, key: undefined, omitted: n - PER_KIND_CAP, message: `${PER_KIND_CAP} of ${n} ${first.code} findings${first.table ? ` in ${first.table}${first.field ? '.' + first.field : ''}` : ''} shown.` });
+      this.out.push({ ...first, row: undefined, key: undefined, omitted: n - PER_KIND_CAP, hidden: this.past.get(k), message: `${PER_KIND_CAP} of ${n} ${first.code} findings${first.table ? ` in ${first.table}${first.field ? '.' + first.field : ''}` : ''} shown.` });
     }
     return this.out;
   }

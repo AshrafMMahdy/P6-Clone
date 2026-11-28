@@ -25,6 +25,7 @@ import { repairKeys } from '../core/xer/repair.ts';
 import { REFUSED_ACTUALS, repairToValid, unidentified } from '../core/xer/repair-valid.ts';
 import { lostKinds, p6Name, PROGRESS_FIELDS, STATUS_WORDS } from '../core/p6words.ts';
 import { cutAnswer, truncationNote } from './answerCap.ts';
+import { evenly } from '../core/notes.ts';
 import { argumentNotUsed, cancelledAfter, cap, dataDateWritten, leveledDatesNote, offBaselineNotes, scheduleRemovesLeveling, splitRefusal, datesNotCurrent, datesNotStored, isDuplicateRowNote, droppedOnSave, listCut, stillWorking, namesText, notRepaired, openedRepaired, plural, withoutAdvice } from '../core/notes.ts';
 import { validateXer } from '../core/xer/validate.ts';
 import { mspDateChanges, mspUntouched } from '../core/msp/keep.ts';
@@ -82,7 +83,7 @@ import { nowStamp } from '../core/report/reports.ts';
 import { defaultEstimates, runMonteCarlo, type MonteCarloOptions, type Sampler } from '../core/risk/montecarlo.ts';
 import { claimHere, keptPlace, IterationFile, keepWords, type Claim } from './keptRuns.ts';
 import { baseCurrency, namesCurrency, withCurrency } from '../core/currency.ts';
-import { DEFAULT_FOLDER, defaultResultFolder, exportAfterChange, exportDoc, exportFolder, exportName, exportNameProp, exportOf, exportProp, exportResult, noteCuts, RESULT_FILE_TOOLS } from './export.ts';
+import { DEFAULT_FOLDER, defaultResultFolder, exportAfterChange, exportDoc, exportFolder, exportName, exportNameProp, exportOf, exportProp, exportResult, noteCuts, RESULT_FILE_TOOLS, LIST_KEYS } from './export.ts';
 import { LISTED } from '../core/analysis/common.ts';
 import { criticalityNote, sensitivityNote } from './mcNotes.ts';
 import { dayHours } from '../core/project/units.ts';
@@ -157,14 +158,20 @@ const inSummary = (s: Session, notes: string[], leaveOut?: (note: string) => boo
 const summary = (s: Session) => runTool('project_summary', {}, s.db, makeCtx(s.db, { hoursPerDay: s.hpd }), [], s.hpd, true);
 /** The findings of an answer by the list rule: the first LISTED, findings_total beside them when there are more, and the file that holds every one (`all`: every one in the answer, for an export;
  *  `note` false: an export of the call holds them and noteCuts names it). */
-const cutFindings = <T extends object>(list: T[], all?: boolean, note = true): { findings: T[]; findings_total?: number; findings_note?: string } => {
-  if (all || list.length <= LISTED) return { findings: list };
+const cutFindings = <T extends object>(list: T[], all?: boolean, note = true, every?: T[]): { findings: T[]; findings_total?: number; findings_note?: string } => {
+  // `every`: the list with the findings a folded line stands for (the validator's 5 a kind): when it is longer, the file holds it, and the note says so
+  if (every && every.length > list.length && !all && note) {
+    const cols = Object.keys(every[0]), shown = list.length <= LISTED ? list : list.slice(0, LISTED);
+    const file = writeResultFile('findings', [cols.join(','), ...every.map((x) => cols.map((c) => `"${String((x as Record<string, unknown>)[c] ?? '').replace(/"/g, '""')}"`).join(','))].join('\r\n'), 'csv');
+    return { findings: shown, findings_total: every.length, findings_note: listCut(shown.length, every.length, file ?? undefined) };
+  }
+  if (all || list.length <= LISTED) return { findings: all && every ? every : list };
   if (!note) return { findings: list.slice(0, LISTED), findings_total: list.length };
   const cols = Object.keys(list[0]);
   const file = writeResultFile('findings', [cols.join(','), ...list.map((x) => cols.map((c) => `"${String((x as Record<string, unknown>)[c] ?? '').replace(/"/g, '""')}"`).join(','))].join('\r\n'), 'csv');
   return { findings: list.slice(0, LISTED), findings_total: list.length, findings_note: listCut(LISTED, list.length, file ?? undefined) };
 };
-const brief = (f: Finding[], o: { fatalListedElsewhere?: string; all?: boolean; fileNote?: boolean } = {}) => ({ verdict: worst(f) ?? 'clean', counts: f.reduce<Record<string, number>>((a, x) => ((a[x.severity] = (a[x.severity] ?? 0) + findingCount(x)), a), {}), ...(o.fatalListedElsewhere && f.some((x) => x.severity === 'fatal') ? { fatal_listed_in: o.fatalListedElsewhere } : {}), ...cutFindings(f.filter((x) => x.severity !== 'info' && !(o.fatalListedElsewhere && x.severity === 'fatal')).map((x) => ({ severity: x.severity, code: x.code, where: [x.table, x.field, x.key].filter(Boolean).join(' '), message: x.message })), o.all, !o.fileNote) });
+const brief = (f: Finding[], o: { fatalListedElsewhere?: string; all?: boolean; fileNote?: boolean } = {}) => ({ verdict: worst(f) ?? 'clean', counts: f.reduce<Record<string, number>>((a, x) => ((a[x.severity] = (a[x.severity] ?? 0) + findingCount(x)), a), {}), ...(o.fatalListedElsewhere && f.some((x) => x.severity === 'fatal') ? { fatal_listed_in: o.fatalListedElsewhere } : {}), ...(() => { const keep = (x: Finding) => !(o.fatalListedElsewhere && x.severity === 'fatal'), row = (x: Finding) => ({ severity: x.severity, code: x.code, where: [x.table, x.field, x.key].filter(Boolean).join(' '), message: x.message }); const every = f.flatMap((x) => (x.omitted != null ? x.hidden ?? [] : [x])).filter(keep); return cutFindings(f.filter(keep).map(row), o.all, !o.fileNote, f.some((x) => x.hidden?.length) ? every.map(row) : undefined); })() });
 const dd = (v: unknown) => { if (v == null || v === '') return null; const t = parseP6Date(String(v)); if (t == null) fail('bad_input', `"${v}" is not a date.`, 'Use YYYY-MM-DD or YYYY-MM-DD HH:MM.'); return t; };
 const projectIds = (db: Db, id: unknown) => {
   const ps = (db.tables.PROJECT?.rows ?? []).filter((p) => !p._baseline_of);
@@ -873,7 +880,6 @@ async function run(name: string, a: Record<string, any>, ctx: Ctx): Promise<unkn
         const sortedFin = Float64Array.from(r.finishSamples).sort();
         const fullCurve: { finish: string | null; cum_pct: number }[] = [];
         for (let i = 0; i < sortedFin.length; i++) if (i + 1 === sortedFin.length || sortedFin[i + 1] !== sortedFin[i]) fullCurve.push({ finish: iso(sortedFin[i]), cum_pct: (100 * (i + 1)) / sortedFin.length });
-        const evenly = <T,>(list: T[], n: number): T[] => (list.length <= n ? list : Array.from({ length: n }, (_, i) => list[Math.round((i * (list.length - 1)) / (n - 1))]));
         const cumulative = config.screens ? r.cumulative.map((p) => ({ finish: iso(p.t), cum_pct: p.pct })) : evenly(fullCurve, LISTED);
         const sensitivity = r.sensitivity.map((x) => ({ id: x.code, ...named(x.taskId), name: x.name, correlation: a.exact === true ? x.rho : Math.round(x.rho * 100) / 100 }));
         // the lists are cut to LISTED (the desktop screens read them whole) and say how many there are
@@ -1334,6 +1340,9 @@ async function callToolRun(name: string, a: Record<string, any>, sessionCaller?:
   const work = () => watchReport.run({ line: reportBusy, silence: (x) => { if (busy.job) noteSilence(busy.job as Parameters<typeof noteSilence>[0], x); } }, async () => {
     let out = handle != null ? await exclusive(handle, () => withWorkingSet(name, a, handle, () => run(name, a, ctx))) : await run(name, a, ctx);
     const plain = !!out && typeof out === 'object' && !Array.isArray(out);
+    // (item 26, rule 3: the lists a result-file tool gave whole are cut to the first 25 with their total — not for the desktop's own screens,
+    // which draw every row; noteCuts then names the result file that holds them)
+    if (plain && !config.screens && LIST_KEYS[name]) out = cutListed(out, LIST_KEYS[name]);
     if (plain) out = noteCuts(out, name); // where the whole of each cut list is, when an export was written (export.ts)
     if (plain && handle && READS_SAVED_DATES.has(name) && !(out as { error?: unknown }).error && !(out as { job_id?: unknown }).job_id) {
       const s0 = sessions.get(handle), said = s0 ? savedDatesNotes(s0, a.project) : [];
