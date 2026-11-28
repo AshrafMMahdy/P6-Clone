@@ -45,7 +45,7 @@ test('3: a constraint given as a bare date, met at 17:00 of the working day befo
 test('4: compute_schedule with a loop says the links left out once, with no unmet sentence for them and no "saved logic" (it saves nothing)', async () => {
   const c = await call('compute_schedule', { start: '2026-01-05', activities: [
     { id: 'A', duration_days: 2 }, { id: 'B', duration_days: 2, predecessors: [{ id: 'A' }] }, { id: 'C', duration_days: 2, predecessors: [{ id: 'B' }] }, { id: 'D', duration_days: 2, predecessors: [{ id: 'C' }] },
-  ], relationships: [{ pred: 'D', succ: 'A' }] });
+  ], relationships: [{ pred: 'D', succ: 'A' }], break_loops: true }); // (a loop is refused unless break_loops: true, as P6 refuses one: item 26)
   assert.equal(c.ok, true, JSON.stringify(c).slice(0, 400));
   const notes: string[] = c.notes;
   const left = notes.filter((n) => /Left out of this schedule/.test(n));

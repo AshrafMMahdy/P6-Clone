@@ -150,7 +150,8 @@ export function readTable(db: Db, name: string, projIds: string[] | null, o: { o
   const { real: realName, t } = hit;
   const shownName = [...all_].find(([, v]) => v === hit)![0];
   const all = t.rows.filter(inProjects(t, projIds));
-  const offset = Math.max(0, Math.floor(Number(o.offset) || 0)), limit = o.limit == null ? 1000 : Math.max(1, Math.floor(Number(o.limit) || 1000));
+  // every row unless a limit is asked (item 26: a reading tool returns what is asked); the caller checks the numbers (countArg)
+  const offset = o.offset ?? 0, limit = o.limit ?? Infinity;
   const page = all.slice(offset, offset + limit);
   const every = columnsOf(realName, t, all);
   let columns = every;

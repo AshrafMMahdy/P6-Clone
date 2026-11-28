@@ -14,7 +14,7 @@ import { parseP6Date } from '../dates.ts';
 export const COMPUTE_GUIDE = `start (planned start, YYYY-MM-DD), [data_date] (default start), [must_finish_by], [hours_per_day] (default 8: days where a calendar has no day length), [calendar] (default calendar name), `
   + `[calendars [{name, work_week or copy_from, holidays, work_exceptions}] as add_calendar: each has a week of its own or copies one], activities [{id, [name], [type], [duration_days] or [duration_hours], [calendar], [constraint {type, date}], [secondary_constraint], `
   + `[actual_start], [actual_finish], [remaining_days] or [remaining_hours], [percent_complete], [expected_finish], [predecessors [{id, [type], [lag_days] or [lag_hours]}]]}] (fields as add_activity / update_activity), `
-  + `[relationships [{pred, succ, [type], [lag_days] or [lag_hours]}]], [options {${SCHEDULE_OPTIONS_GUIDE}}], [break_loops] (default true: links that close a loop are left out and returned in broken_links; false: a loop fails the call), `
+  + `[relationships [{pred, succ, [type], [lag_days] or [lag_hours]}]], [options {${SCHEDULE_OPTIONS_GUIDE}}], [break_loops] (default false: a loop fails the call and is named, as P6 refuses one; true: links that close a loop are left out and returned in broken_links), `
   + `[offset], [limit], [names]. Answer: finish, data_date, loops [[activity IDs]], broken_links, notes, and the rows: ${TABLE_GUIDE}`;
 
 export type ComputeAnswer = ({ ok: true; finish: string | null; data_date: string | null; loops: string[][]; broken_links: { pred: string; succ: string; type: string }[]; notes: string[] } & ActivityTable)
@@ -34,7 +34,10 @@ export function computeSchedule(a: Record<string, any>): ComputeAnswer {
   const bad = (message: string, where?: string): ComputeAnswer => ({ ok: false, error: { code: 'bad_input', message, ...(where ? { where } : {}) } });
   if (typeof a.start !== 'string' || !a.start) return bad('Give "start", the planned start (YYYY-MM-DD).');
   if (!Array.isArray(a.activities) || !a.activities.length) return bad('Give "activities": [{id, duration_days, predecessors?...}].');
-  const hpd = Number(a.hours_per_day) || 8;
+  // 8 hours a day when none is given: P6's own default Hours per Day (item 26, rule 6); anything that is not a number above 0 and at most 24 is refused
+  if (a.hours_per_day != null && !(typeof a.hours_per_day === 'number' && a.hours_per_day > 0 && a.hours_per_day <= 24)) return bad(`hours_per_day must be a number above 0 and at most 24 (got ${JSON.stringify(a.hours_per_day)}).`, 'hours_per_day');
+  for (const [k, least] of [['offset', 0], ['limit', 1]] as const) if (a[k] != null && !(typeof a[k] === 'number' && Number.isSafeInteger(a[k]) && a[k] >= least)) return bad(`${k} must be a whole number of ${least} or more (got ${JSON.stringify(a[k])}).`, k);
+  const hpd: number = a.hours_per_day ?? 8;
   const ops: Op[] = [], where: string[] = [];
   const put = (op: Op, w: string) => { ops.push(op); where.push(w); };
   put({ op: 'add_project', id: 'COMPUTE', start: a.start, ...(a.must_finish_by ? { must_finish_by: a.must_finish_by } : {}) }, 'start / must_finish_by');
@@ -54,7 +57,8 @@ export function computeSchedule(a: Record<string, any>): ComputeAnswer {
   // (compute_schedule has no project to edit: the calendar and the activity's calendar are the inputs it names)
   if (!r.ok) return bad(r.error!.message.replace(/^add_calendar needs/, 'A calendar of calendars[] needs').replace('edit update_activity calendar', 'activities[].calendar'), where[r.error!.index]);
   const pid = rows(db, 'PROJECT')[0].proj_id;
-  const s = scheduleProjects(db, [pid], { breakLoops: a.break_loops !== false });
+  // a loop fails the call, as P6 refuses one, unless break_loops: true asks for the closing links to be left out (item 26, rule 4: P6's own default)
+  const s = scheduleProjects(db, [pid], { breakLoops: a.break_loops === true });
   const loops = s.loops ?? [];
   if (!s.ok) return { ok: false, error: { code: 'schedule_failed', message: s.findings.filter((f) => f.severity === 'error').map((f) => f.message.replace('(edit delete_relationship)', '(in predecessors or relationships)').replace('schedule with break_loops: true', 'pass break_loops: true')).join(' '), ...(loops.length ? { loops } : {}) } };
   const code = new Map(rows(db, 'TASK').map((t) => [t.task_id, t.task_code]));

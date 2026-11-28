@@ -24,7 +24,7 @@ import { applyOps } from '../core/project/ops.ts';
 import { scheduleProjects } from '../core/schedule/cpm.ts';
 import { nowStamp } from '../core/report/reports.ts';
 import { formatP6Date, parseP6Date } from '../core/dates.ts';
-import { config, countArg, estimateBytes, fail, getSession, pathArg, readCause, reserveMemory, type Session } from './runtime.ts';
+import { config, countArg, estimateBytes, fail, getSession, numArg, pathArg, readCause, reserveMemory, type Session } from './runtime.ts';
 import { between as betweenMax } from './workset.ts';
 import { cutWindow, tiaBaseline, timeImpact, windowsAnalysis, type Update } from '../core/analysis/delay.ts';
 import { exportAfterChange, exportDoc, exportNameProp, exportOf, exportProp, exportResult, firstOf, type Table } from './export.ts';
@@ -202,13 +202,13 @@ export async function runAnalysis(name: string, a: Record<string, any>, s: Sessi
     case 'check_schedule': {
       const unknown = (a.checks ?? []).filter((c: string) => !P6_CHECKS.some((x) => x.id === c));
       if (unknown.length) fail('bad_input', `Unknown check(s): ${unknown.join(', ')}.`, `Checks: ${P6_CHECKS.map((c) => c.id).join(', ')}.`);
-      const r = checkSchedule(s.db, { projIds, hoursPerDay: s.hpd, checks: a.checks, targets: a.targets, thresholdHours: a.threshold_days != null ? Number(a.threshold_days) * s.hpd : undefined, maxIds: 0 });
+      const r = checkSchedule(s.db, { projIds, hoursPerDay: s.hpd, checks: a.checks, targets: a.targets, thresholdHours: a.threshold_days != null ? numArg(a.threshold_days, 'threshold_days', { min: 0 })! * s.hpd : undefined, maxIds: 0 });
       return checked(r, CHECK_COLUMNS, 'failing_activities', [{ name: 'projects', columns: ['id', 'name', 'data_date', 'activities', 'completed', 'relationships', 'missing_baseline_activities'], rows: r.projects }]);
     }
     case 'dcma_14': {
       if (a.profile != null && !DCMA_PROFILES[a.profile]) fail('bad_input', `Unknown profile "${a.profile}".`, `Profiles: ${Object.keys(DCMA_PROFILES).join(', ')}.`);
       if (a.baseline != null && !projIds.some((id) => baselineOf(s.db, s.db.tables.PROJECT.rows.find((p) => p.proj_id === id)!, String(a.baseline)))) fail('bad_input', `No baseline "${a.baseline}" for this project.`, `Use project, bl1, bl2, bl3 or a saved baseline's name: ${savedBaselines(s.db, projIds).join(', ') || 'none saved'}.`);
-      const limit = a.limit_days === 'dynamic' ? 'dynamic' : a.limit_days != null ? Number(a.limit_days) : undefined;
+      const limit = a.limit_days === 'dynamic' ? 'dynamic' : numArg(a.limit_days, 'limit_days', { min: 0, hint: 'Pass limit_days as a number of working days, or "dynamic", or leave it out for 44.' });
       return checked(dcma14(s.db, { projIds, hoursPerDay: s.hpd, profile: a.profile, thresholds: a.thresholds, baseline: a.baseline, statusDate: h.dd(a.status_date), targetFinish: h.dd(a.target_finish), cptSlipDays: a.cpt_slip_days != null ? Number(a.cpt_slip_days) : undefined, cptActivity: a.cpt_activity, limitDays: limit, exempt: a.exempt, maxIds: 0 }), CHECK_COLUMNS, 'failing_activities');
     }
     case 'float_paths': {
@@ -220,7 +220,7 @@ export async function runAnalysis(name: string, a: Record<string, any>, s: Sessi
       const r = computeFloatPaths(s.db, projIds, opts);
       const stale = [...dataDateGaps(rows(s.db, 'PROJECT').filter((p) => projIds.includes(p.proj_id)), '', 'data_date', false), ...storedDatesState(s.db, projIds).stale.map((x) => datesNotCurrent(x.proj, x.differ, x.open, true, x.keptMsp))]; // the paths read the saved float
       if (a.write) h.apply('Float paths', (d) => writeFloatPaths(d, projIds, computeFloatPaths(d, projIds, opts).assign));
-      const nearDays = a.near_critical_days != null ? Number(a.near_critical_days) : 10;
+      const nearDays = numArg(a.near_critical_days, 'near_critical_days', { min: 0 }) ?? 10;
       const tasks = (s.db.tables.TASK?.rows ?? []).filter((t) => projIds.includes(t.proj_id) && !t.act_end_date && t.task_type !== 'TT_WBS' && t.total_float_hr_cnt !== '' && t.total_float_hr_cnt != null);
       const near = tasks.map((t) => ({ t, d: Number(t.total_float_hr_cnt) / s.hpd })).filter((x) => x.d > 0 && x.d <= nearDays).sort((x, y) => x.d - y.d).map((x) => ({ id: x.t.task_code, name: x.t.task_name, total_float_days: Math.round(x.d * 10) / 10 }));
       // float in days of each activity's own calendar, like every other answer (the core result keeps hours for the desktop panel that reads them)
@@ -248,7 +248,7 @@ export async function runAnalysis(name: string, a: Record<string, any>, s: Sessi
     case 'resource_histogram': {
       const period = a.period ?? 'week';
       if (period !== 'week' && period !== 'month') fail('bad_input', 'period must be week or month.', 'Use week or month.');
-      const r = resourceHistograms(s.db, projIds, { resources: a.resources, period, cost: a.cost === true, threshold: a.threshold != null ? Number(a.threshold) : undefined });
+      const r = resourceHistograms(s.db, projIds, { resources: a.resources, period, cost: a.cost === true, threshold: numArg(a.threshold, 'threshold', { min: 0 }) });
       if (a.resources?.length && !r.resources.length) fail('bad_input', `No assignments for ${a.resources.join(', ')}.`, 'Use resource IDs that are assigned in this project (list_dictionaries or resource_summary).');
       // the export: every resource with its periods
       const PERIOD_COLUMNS = ['resource', 'start', 'end', 'budgeted', 'actual', 'remaining_early', 'remaining_late', 'limit', 'over_allocated', 'available'];
@@ -287,7 +287,7 @@ export async function runAnalysis(name: string, a: Record<string, any>, s: Sessi
       const batchStore: RowStore = a.export == null ? store : { open: (x) => store.open(x), resumeAt: (n) => store.resumeAt(n), add: (k) => store.add(k), stop: (d) => store.stop(d), finish: () => { finishAsked = true; return undefined; } };
       let r: Awaited<ReturnType<typeof evaluateBatch>>, files: ReturnType<typeof exportResult> | undefined, finished: string | undefined;
       try {
-        r = await evaluateBatch(s.db, projIds, a.scenarios.map((x: any, i: number) => ({ name: String(x?.name ?? `scenario ${i + 1}`), overrides: x.overrides })), { hoursPerDay: s.hpd, top: a.top != null ? Number(a.top) : undefined, tick: h.tick, onRow: h.keep, store: batchStore });
+        r = await evaluateBatch(s.db, projIds, a.scenarios.map((x: any, i: number) => ({ name: String(x?.name ?? `scenario ${i + 1}`), overrides: x.overrides })), { hoursPerDay: s.hpd, top: countArg(a.top, 'top', { min: 1 }), tick: h.tick, onRow: h.keep, store: batchStore });
         if (r.ok && a.export != null) {
           const rows = r.scenarios;
           // each scenario as answered, with every activity whose dates it moved, read from the kept file as it is written
@@ -360,7 +360,7 @@ export async function runAnalysis(name: string, a: Record<string, any>, s: Sessi
       const samples = countArg(a.samples, 'samples'); // only where it is used: min_crash_cost (above) does not sample
       const ops = (d: Db, list: unknown[]) => { const x = applyOps(d, list, { hoursPerDay: s.hpd, calendarDays: true }); if (!x.ok) fail('bad_input', x.error!.message, ''); };
       let r;
-      try { r = await optimizeSchedule(s.db, projIds, { samples, seed: a.seed != null ? Number(a.seed) : undefined, activities: a.activities, hoursPerDay: s.hpd, tick: h.tick, maxPriority }, nodeInfer, ops); }
+      try { r = await optimizeSchedule(s.db, projIds, { samples, seed: countArg(a.seed, 'seed'), activities: a.activities, hoursPerDay: s.hpd, tick: h.tick, maxPriority }, nodeInfer, ops); }
       catch (e) { if (e instanceof ReasonerUnavailable) return fail('reasoner_unavailable', e.message, 'Use level_resources (P6 leveling) or crash_schedule meanwhile.'); throw e; }
       if (!r.ok) return fail(r.error.code, r.error.message, r.error.code === 'reasoner_failed' ? 'Use level_resources (P6 leveling) or crash_schedule meanwhile.' : 'Give resources a Max Units/Time limit (add_resource max_units_per_hour) or pass crash data in activities.');
       const { order, dates, biggest_changes, priority_rows: priorityRows, field_changes: fieldChanges, field_ranks: fieldRanks, ...answer } = r;

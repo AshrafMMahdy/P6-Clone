@@ -113,6 +113,17 @@ export function countArg(v: unknown, what: string, o: { min?: number; hint?: str
   const shown = typeof v === 'number' ? String(v) : typeof v === 'string' ? JSON.stringify(v) : typeof v;
   return fail('bad_input', `${what} must be a whole number of ${min} or more (got ${shown}).`, o.hint ?? `Pass ${what} as a whole number, or leave it out for the default.`);
 }
+/** A number argument that need not be whole (days, a tolerance, a percentage, frames a second): absent (null or undefined) is undefined,
+ *  for the caller's documented default; anything else must be a finite number within [min, max], or it is refused as bad_input naming
+ *  the argument and the range (item 26, owner 2026-11-28: wrong input refused in words — never clamped, floored or read as a default). */
+export function numArg(v: unknown, what: string, o: { min?: number; max?: number; above?: number; hint?: string } = {}): number | undefined {
+  if (v == null) return undefined;
+  const ok = typeof v === 'number' && Number.isFinite(v) && (o.min == null || v >= o.min) && (o.max == null || v <= o.max) && (o.above == null || v > o.above);
+  if (ok) return v as number;
+  const range = [o.above != null ? `above ${o.above}` : o.min != null ? `${o.min} or more` : '', o.max != null ? `at most ${o.max}` : ''].filter(Boolean).join(' and ');
+  const shown = typeof v === 'number' ? String(v) : typeof v === 'string' ? JSON.stringify(v) : typeof v;
+  return fail('bad_input', `${what} must be a number${range ? ` ${range}` : ''} (got ${shown}).`, o.hint ?? `Pass ${what} as a number${range ? ` ${range}` : ''}, or leave it out for the default.`);
+}
 export function pathArg(p: unknown, what = 'path', mode: 'read' | 'write' = 'read'): string {
   if (typeof p !== 'string' || !p.trim()) fail('bad_input', `Give "${what}" (a file path).`, 'Pass the file path as a string.');
   const s = (p as string).trim();

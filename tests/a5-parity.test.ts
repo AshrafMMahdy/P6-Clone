@@ -82,10 +82,10 @@ test('G-2 compute_schedule: no handle; the same rows as a project built and sche
   assert.equal(c.ok, true, JSON.stringify(c));
   assert.deepEqual(c.rows.map((x: unknown[]) => [x[0], x[1], x[3], x[4]]), [['A', 'IP', '2026-03-02 08:00', '2026-03-07 16:00'], ['B', 'NS', '2026-03-16 08:00', '2026-03-17 17:00']]);
   assert.equal(col(c, 'total_float_days').B, 7); // to must finish by 2026-03-27 00:00: late finish 03-26 17:00
-  // a loop: the link that closes it is left out and named
-  const l = await call('compute_schedule', { start: '2026-03-02', activities: [{ id: 'A', duration_days: 1, predecessors: [{ id: 'C' }] }, { id: 'B', duration_days: 1, predecessors: [{ id: 'A' }] }, { id: 'C', duration_days: 1, predecessors: [{ id: 'B' }] }] });
+  // a loop: refused by default and named, as P6 refuses one (item 26); with break_loops: true the link that closes it is left out and named
+  const l = await call('compute_schedule', { break_loops: true, start: '2026-03-02', activities: [{ id: 'A', duration_days: 1, predecessors: [{ id: 'C' }] }, { id: 'B', duration_days: 1, predecessors: [{ id: 'A' }] }, { id: 'C', duration_days: 1, predecessors: [{ id: 'B' }] }] });
   assert.deepEqual([l.ok, l.loops.map((x: string[]) => [...x].sort()), l.broken_links], [true, [['A', 'B', 'C']], [{ pred: 'C', succ: 'A', type: 'FS' }]]);
-  const nl = await call('compute_schedule', { start: '2026-03-02', break_loops: false, activities: [{ id: 'A', duration_days: 1, predecessors: [{ id: 'B' }] }, { id: 'B', duration_days: 1, predecessors: [{ id: 'A' }] }] });
+  const nl = await call('compute_schedule', { start: '2026-03-02', activities: [{ id: 'A', duration_days: 1, predecessors: [{ id: 'B' }] }, { id: 'B', duration_days: 1, predecessors: [{ id: 'A' }] }] });
   assert.deepEqual([nl.ok, nl.error.code, nl.error.loops.map((x: string[]) => [...x].sort())], [false, 'schedule_failed', [['A', 'B']]]);
   // bad input says where
   const bad = await call('compute_schedule', { start: '2026-03-02', activities: [{ id: 'A', duration_days: 1, predecessors: [{ id: 'Z' }] }] });
