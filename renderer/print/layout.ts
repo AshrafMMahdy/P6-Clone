@@ -120,11 +120,12 @@ export function layoutSchedule(p: LayoutInput): Page[] {
   const pages = Math.max(1, Math.ceil(rows.length / perPage));
 
   // timescale: the rows' span rounded out to whole months, or the chosen dates
-  let lo = Infinity, hi = -Infinity;
+  let lo = Infinity, hi = -Infinity, noDates = false;
   const span = (r: ActRow): [number | null, number | null] => r.kind === 'group' ? [r.es ?? null, r.ef ?? null] : [p.taskStart(r.task!), p.taskFinish(r.task!)];
   for (const r of rows) { const [s, f] = span(r); if (s != null && s < lo) lo = s; if (f != null && f > hi) hi = f; }
   if (ps.range === 'custom') { lo = parseP6Date(ps.from) ?? lo; hi = parseP6Date(ps.to) ?? hi; }
-  if (!Number.isFinite(lo) || !Number.isFinite(hi) || hi <= lo) { lo = p.dataDate ?? Date.UTC(2026, 0, 1) / 60000; hi = lo + 30 * 1440; }
+  // nothing dated to print: the timescale is the data date (else today) and 30 days after, and the page says so (item 26: it was 1 Jan 2026)
+  if (!Number.isFinite(lo) || !Number.isFinite(hi) || hi <= lo) { lo = p.dataDate ?? Math.floor(Date.now() / 86400000) * 1440; hi = lo + 30 * 1440; noDates = true; }
   const d0 = new Date(lo * 60000), d1 = new Date(hi * 60000);
   const t0 = Date.UTC(d0.getUTCFullYear(), d0.getUTCMonth(), 1) / 60000, t1 = Date.UTC(d1.getUTCFullYear(), d1.getUTCMonth() + 1, 1) / 60000;
   const X = (t: number) => gx + Math.max(0, Math.min(1, (t - t0) / (t1 - t0))) * gw;
@@ -155,6 +156,7 @@ export function layoutSchedule(p: LayoutInput): Page[] {
 
     // column titles and timescale
     P.push({ t: 'rect', x: x0, y: top, w: cw, h: headH, fill: C.head, stroke: C.line, lw: 0.25 });
+    if (noDates && gantt) P.push({ t: 'text', x: gx + gw / 2, y: top + headH + rh, s: 'No dated activity: the timescale is the data date (else today) and 30 days after.', pt: 7, color: '#666', align: 'c' });
     cols.forEach((c, i) => {
       if (i) P.push({ t: 'line', x1: colX[i], y1: top, x2: colX[i], y2: top + headH, color: C.line, lw: 0.25 });
       P.push({ t: 'text', x: colX[i] + colW(i) / 2, y: top + headH / 2 + pt * PT * 0.35, s: fit(c.title, colW(i) - 1, pt, true), pt, bold: true, align: 'c' });

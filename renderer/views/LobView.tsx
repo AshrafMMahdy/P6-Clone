@@ -21,6 +21,7 @@ import { taktCheck, taktApply, taktZones } from '../../core/lob/takt.ts';
 import { locationDurations } from '../../core/lob/edit.ts';
 import { writeTactplan } from '../../core/lob/tactplan.ts';
 import type { LobChange, LobModel } from '../../core/lob/model.ts';
+import { LISTED } from '../../core/notes.ts';
 
 const W = 1200;
 const bar = { display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' } as const;
@@ -201,7 +202,8 @@ function TaktGrid({ db, projId, model, act }: { db: Db; projId: string; model: L
   const colour = (v: string) => (v.startsWith('!') ? '#d62728' : ['#1f77b4', '#d62728', '#2ca02c', '#9467bd', '#ff7f0e', '#17becf', '#8c564b', '#e377c2'][Number(v) % 8]);
   return <div style={{ padding: 8 }}>
     <div style={bar}>Takt {model.takt.taktDays} days · {check.fits ? 'every trade fits' : `${check.misfits.length} trade × zone do not fit`} {!check.fits && <button onClick={() => { const r = taktApply(model); if (commitLob('Onto the takt', projId, model, r.model)) toast(say(r.changes)); }}>Fit to the takt</button>}</div>
-    {check.misfits.slice(0, 8).map((x) => <div key={`${x.task}${x.zone}`} className="muted">{x.task} in {x.zone}: {x.days} days ({x.fix})</div>)}
+    {check.misfits.slice(0, LISTED).map((x) => <div key={`${x.task}${x.zone}`} className="muted">{x.task} in {x.zone}: {x.days} days ({x.fix})</div>)}
+    {check.misfits.length > LISTED && <div className="muted">and {check.misfits.length - LISTED} more</div>}
     <table style={{ borderCollapse: 'collapse', marginTop: 6 }}><tbody>{[...zones].reverse().map((z) => <tr key={z.code}><td style={{ paddingRight: 6 }}>{model.locations.find((l) => l.code === z.code)?.name ?? z.code}</td>{Array.from({ length: last + 1 }, (_, p) => { const v = cells.get(`${z.code}|${p}`); return <td key={p} title={v ? (v.startsWith('!') ? 'two trades' : model.tasks[Number(v)].code) : ''} style={{ width: 22, height: 18, border: '1px solid #eef1f5', background: v ? colour(v) : '#fff' }} />; })}</tr>)}</tbody></table>
   </div>;
 }

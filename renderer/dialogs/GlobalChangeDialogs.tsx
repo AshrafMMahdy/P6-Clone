@@ -149,7 +149,7 @@ export function GlobalChangeReportDialog(props: { id: string }) {
       <p style={{ marginTop: 0 }}>{changes.length} change(s) to {new Set(changes.map((r) => r.taskId)).size} activities{res.length - changes.length ? `; ${res.filter((r) => r.error).length} refused, ${res.filter((r) => !r.error && r.old === r.next).length} already as asked` : ''}. Nothing changes until you commit.</p>
       <div className="tblwrap" style={{ height: 360 }}>
         <table className="tbl gc-report"><thead><tr><th>Activity ID</th><th>Activity Name</th><th>Column</th><th>Old Value</th><th>New Value</th><th>Note</th></tr></thead><tbody>
-          {res.slice(0, 3000).map((r, i) => <tr key={i} style={r.error ? { color: '#a00' } : r.old === r.next ? { color: '#888' } : undefined}><td>{r.code}</td><td>{r.name}</td><td>{r.title}</td><td>{r.old}</td><td>{r.error ? '' : r.next}</td><td>{r.error ?? (r.old === r.next ? 'no change' : '')}</td></tr>)}
+          {res.map((r, i) => <tr key={i} style={r.error ? { color: '#a00' } : r.old === r.next ? { color: '#888' } : undefined}><td>{r.code}</td><td>{r.name}</td><td>{r.title}</td><td>{r.old}</td><td>{r.error ? '' : r.next}</td><td>{r.error ?? (r.old === r.next ? 'no change' : '')}</td></tr>)}
           {!res.length && <tr><td colSpan={6} className="muted">No activity matches the "If" conditions.</td></tr>}
         </tbody></table>
       </div>

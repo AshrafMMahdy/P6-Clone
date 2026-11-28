@@ -10,9 +10,11 @@ import { Semantic } from './normalise.ts';
 import { FEATURE_DIM, FEATURE_DIM_B } from './features.ts';
 import type { Rec } from './pyutil.ts';
 
+// AGREED LIMIT (owner, 2026-11-28): 256 activities, stride 128, 8 windows a run — the scorer's position table; longer programmes are scored in windows, said (windowed_scoring) — why: item 26 rule 6, "Necessary limits - agreed" — necessary because it is the model's format.
 const MAX_LEN = 256;      // the AR scorer's position table (ar_model.MAX_LEN)
 const WINDOW_STRIDE = 128;
 const WINDOWS_PER_RUN = 8;
+// AGREED LIMIT (owner, 2026-11-28): 120 periods — the trajectory model's position table; the notice names how many were left out — why: item 26 rule 6, "Necessary limits - agreed" — necessary because it is the model's format.
 export const MAX_PERIODS = 120;   // the trajectory head's position table (train_traj.MAX_P)
 
 /** Thrown between batches when the client of the running request has gone. */

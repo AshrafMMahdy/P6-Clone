@@ -11,7 +11,7 @@ index 901df10..5e845e5 100644
 +  // P6 Clone: a provider's extra headers by environment too (headersEnv, JSON), so a gateway's token stays out of the file
 +  const hdr = provider.headersEnv ? process.env[provider.headersEnv] : '';
 +  if (!hdr) return out;
-+  try { return { ...out, headers: { ...(out.headers && typeof out.headers === 'object' ? out.headers : {}), ...JSON.parse(hdr) } }; } catch { return out; }
++  try { return { ...out, headers: { ...(out.headers && typeof out.headers === 'object' ? out.headers : {}), ...JSON.parse(hdr) } }; } catch (e) { throw new Error(`Provider ${providerName}: ${provider.headersEnv} is not a JSON object of headers (${e.message}); the app writes it as JSON, so a hand-set value must be one.`); } // refused, not dropped (item 26, rule 1)
  }
  
  // ── Role resolution ──────────────────────────────────────────────────────────

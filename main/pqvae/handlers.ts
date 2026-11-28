@@ -41,6 +41,7 @@ export async function encode(e: Engines, body: Rec): Promise<Rec> {
  *  the platform client's 180 s on a PC several times slower than the build machine. Names read before cost nothing, so a programme reviewed
  *  again is read exactly; after a shared review the engine reads the exact names while it is idle (MiniLm.fill), so the next review is exact.
  *  On the GPU (2,000+ names a second) the same 40 s is 60,000 names: JWM is read exactly. */
+// AGREED LIMIT (owner, 2026-11-28): 3,000 names (60,000 on the GPU) — above it, names differing only in digits share one text reading; the answer's note says so — why: item 26 rule 7, "Analysis thresholds - agreed as long as it is visible" — sized to the platform client's call limit; arbitrary by agreement.
 const SHARE_ABOVE = (gpu = false): number => Number(process.env.PQVAE_SHARE_ABOVE) || (gpu ? 60000 : 3000);
 
 export async function reviewSchedule(e: Engines, body: Rec): Promise<Rec> {

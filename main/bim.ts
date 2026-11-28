@@ -81,6 +81,7 @@ export function registerBim(getWin: () => BrowserWindow | null): void {
   });
   // a video on this computer's GPU: the viewer page offscreen, encoded in the page (WebCodecs), saved where the user says
   ipcMain.handle('bim:video', async (_e, o: { hash: string; timeline: unknown; options: Record<string, unknown>; from?: string; to?: string; step?: number; fps?: number; width?: number; height?: number; name: string }) => {
+    // AGREED LIMIT (owner, 2026-11-28): 1280 x 720 — the 4D video window when no size is given (the MCP's render_4d says its size) — why: item 26 rule 4, "Defaults - agreed" — arbitrary by agreement.
     const w = new BrowserWindow({ show: false, width: o.width ?? 1280, height: o.height ?? 720, webPreferences: { offscreen: false, backgroundThrottling: false } });
     try {
       await w.loadURL(`p6c4d://model/${o.hash}/render.html`);

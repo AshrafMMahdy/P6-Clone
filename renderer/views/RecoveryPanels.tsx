@@ -13,6 +13,7 @@ import { CHANGED_SINCE, crashArgs, crashStopped, optimizeArgs, optimizeNotes, OP
 import { useChangedSince, useToolRun } from './toolRun.ts';
 import { afterCrash, afterOptimize, applyResult } from './applyResult.ts';
 import { RunStatus } from './RunStatus.tsx';
+import { LISTED } from '../../core/notes.ts';
 
 const Id = ({ id, project }: { id: string; project?: string }) => <a href="#" onClick={(e) => { e.preventDefault(); goToActivity(id, project); }}>{id}</a>;
 const red = { color: '#b00020', whiteSpace: 'pre-wrap' } as const;
@@ -35,7 +36,7 @@ export function CrashPanel() {
   const [applyErr, setApplyErr] = useState('');
   const changed = useChangedSince(stamp);
   // the remaining critical activities are where crash data matters
-  const crit = useMemo(() => rows(db, 'TASK').filter((t) => ui.openProjects.includes(t.proj_id) && !t.act_end_date && t.task_type !== 'TT_WBS' && t.task_type !== 'TT_LOE' && t.task_type !== 'TT_Mile' && t.task_type !== 'TT_FinMile' && t.total_float_hr_cnt !== '' && Number(t.total_float_hr_cnt) <= 0).slice(0, 300), [db, ui.openProjects]);
+  const crit = useMemo(() => rows(db, 'TASK').filter((t) => ui.openProjects.includes(t.proj_id) && !t.act_end_date && t.task_type !== 'TT_WBS' && t.task_type !== 'TT_LOE' && t.task_type !== 'TT_Mile' && t.task_type !== 'TT_FinMile' && t.total_float_hr_cnt !== '' && Number(t.total_float_hr_cnt) <= 0), [db, ui.openProjects]);
   /** crash_schedule's arguments from the panel's settings (Export runs the tool with them too) */
   const toolArgs = () => crashArgs({ mode, days, date, indirect, ld, pct, data });
   // the tool itself, in the Export's child process on the saved database (main/analysis-export-ipc.ts): the window is never held, the run
@@ -135,7 +136,7 @@ export function WhatIfPanel() {
       {res?.ok && <div style={{ overflow: 'auto', flex: 1 }}>
         <div>Project as it is: finish {res.base.finish?.slice(0, 10)}, {res.base.critical} critical, cost {formatMoney(getDb(), res.base.cost)}{res.best ? <> · best: <b>{res.best}</b></> : null}</div>
         <table className="tbl"><thead><tr><th>Scenario</th><th>Finish</th><th>Δ days</th><th>Critical</th><th>Became critical</th><th>Neg. float</th><th>Δ cost</th></tr></thead>
-          <tbody>{res.scenarios.map((s) => <tr key={s.name}><td>{s.name}</td>{s.ok ? <><td>{s.finish?.slice(0, 10)}</td><td>{s.finish_delta_days}</td><td>{s.critical}</td><td>{s.became_critical!.slice(0, 8).map((c, i) => <span key={c}>{i ? ', ' : ''}<Id id={c} /></span>)}{s.became_critical!.length > 8 ? '…' : ''}</td><td>{s.negative_float}</td><td>{s.cost_delta == null ? '' : formatMoney(getDb(), s.cost_delta)}</td></> : <td colSpan={6} style={{ color: "#b00020" }}>{s.error}</td>}</tr>)}</tbody></table>
+          <tbody>{res.scenarios.map((s) => <tr key={s.name}><td>{s.name}</td>{s.ok ? <><td>{s.finish?.slice(0, 10)}</td><td>{s.finish_delta_days}</td><td>{s.critical}</td><td>{s.became_critical!.slice(0, LISTED).map((c, i) => <span key={c}>{i ? ', ' : ''}<Id id={c} /></span>)}{s.became_critical!.length > LISTED ? ` and ${s.became_critical!.length - LISTED} more` : ''}</td><td>{s.negative_float}</td><td>{s.cost_delta == null ? '' : formatMoney(getDb(), s.cost_delta)}</td></> : <td colSpan={6} style={{ color: "#b00020" }}>{s.error}</td>}</tr>)}</tbody></table>
       </div>}
     </div>
   );

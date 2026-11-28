@@ -13,7 +13,8 @@ const W = 170, H = 50, GX = 60, GY = 12, PAD = 10;
 export function TraceLogic() {
   const ui = useStore((s) => s.ui);
   const ctx = useCtx();
-  const [preds, setPreds] = useState(2), [succs, setSuccs] = useState(2), [drivingOnly, setDrivingOnly] = useState(false);
+  // 3 levels each way, the agent's trace_logic default, so the screen and the agent show the same trace (item 26; P6's own default is not stated in Oracle's help)
+  const [preds, setPreds] = useState(3), [succs, setSuccs] = useState(3), [drivingOnly, setDrivingOnly] = useState(false);
   const relFF = useMemo(() => relationshipFloat(ctx.db, ctx), [ctx]);
   const t = ui.selTask ? ctx.taskById.get(ui.selTask) : undefined;
   const trace = useMemo(() => t ? traceLogic(ctx, t.task_id, { preds, succs, drivingOnly }, relFF) : null, [ctx, t, preds, succs, drivingOnly, relFF]);
@@ -29,6 +30,7 @@ export function TraceLogic() {
       height = Math.max(height, PAD * 2 + (ids.length + (trace.more.get(l) ? 1 : 0)) * (H + GY));
     });
   }
+  // AGREED LIMIT (owner, 2026-11-28): 0-5 and 10 levels — the Trace Logic screen's choices (a deeper trace is the agent's trace_logic) — why: item 26 rule 4, "Defaults - agreed" — arbitrary by agreement (screen space).
   const levelSel = (v: number, set: (n: number) => void) => <select value={v} onChange={(e) => set(Number(e.target.value))}>{[0, 1, 2, 3, 4, 5, 10].map((n) => <option key={n} value={n}>{n}</option>)}</select>;
 
   return (

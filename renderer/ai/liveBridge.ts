@@ -9,6 +9,7 @@ import { LIVE_TOOLS, runLive } from './live.ts';
 import { getDb, getUi } from '../store.ts';
 import { makeCtx } from '../model.ts';
 import { exportFile } from '../io.ts';
+import { NEW_XER_NOTE, NEW_XER_VERSION } from '../../core/xer/write.ts';
 
 const AGENT_TOOLS: ToolDef[] = [
   { name: 'export_project', description: 'Save an open project as a schedule file in this chat\'s working folder (00_INPUTS/) for your own schedule tools: then import_schedule_file with the returned path, and review_programme, forecast_outcome, run_cpm, monte_carlo and the rest on its handle. format: xer (default) or xml (P6 XML). project: its Project ID (default: the first open project). Changes nothing in the app.', parameters: { type: 'object', properties: { project: { type: 'string' }, format: { type: 'string', enum: ['xer', 'xml'] } } } },
@@ -19,9 +20,13 @@ async function exportProject(args: Record<string, any>): Promise<unknown> {
   const projects = rows(db, 'PROJECT').filter((p) => !p._baseline_of);
   const p = args.project ? projects.find((x) => x.proj_short_name === String(args.project)) : projects.find((x) => open.includes(x.proj_id));
   if (!p) return { error: args.project ? `No project "${args.project}".` : 'No project is open.' };
+  if (args.format != null && args.format !== 'xer' && args.format !== 'xml') return { error: `Unknown format "${args.format}"; use xer or xml.` };
   const format = args.format === 'xml' ? 'xml' : 'xer';
   const notes: string[] = [];
-  const bytes = exportFile(db, format, { version: '19.12', projIds: [p.proj_id], report: notes });
+  // the versions the MCP save writes (item 26): an XER keeps the version it was read with, else NEW_XER_VERSION; P6 XML 19.12; each said when used
+  const version = format === 'xml' ? '19.12' : db.header?.version || NEW_XER_VERSION;
+  notes.push(format === 'xml' ? 'Written as P6 XML version 19.12, the version given when none is asked: a P6 older than 19.12 may refuse it.' : db.header?.version ? `Written as XER ${version}, the version the file was read with.` : NEW_XER_NOTE);
+  const bytes = exportFile(db, format, { version, projIds: [p.proj_id], report: notes });
   const r = await window.p6.whiq.saveInput(`${p.proj_short_name}.${format}`, bytes);
   return r.ok ? { path: r.data.path, project: p.proj_short_name, format, ...(notes.length ? { notes } : {}) } : { error: r.error };
 }
@@ -41,7 +46,7 @@ export function initLiveBridge(): () => void {
       if (LIVE_TOOLS.some((t) => t.name === name) && !(await operates())) return window.p6.liveReply(id, { ok: true, result: { error: 'Operating the app is turned off (Edit > AI Assistant Settings: "Let it operate the app"). Answer from the read-only tools, or ask the user to turn it on.' } });
       const ui = getUi();
       const result = name === 'export_project' ? await exportProject(args ?? {})
-        : LIVE_TOOLS.some((t) => t.name === name) ? await runLive(name, args ?? {}, () => given.has(id)) : runTool(name, args ?? {}, getDb(), makeCtx(getDb(), ui.prefs), ui.openProjects, ui.prefs.hoursPerDay);
+        : LIVE_TOOLS.some((t) => t.name === name) ? await runLive(name, args ?? {}, () => given.has(id)) : runTool(name, args ?? {}, getDb(), makeCtx(getDb(), ui.prefs), ui.openProjects, ui.prefs.hoursPerDay, true); // days on each activity's own calendar, as the MCP's answers (item 26)
       // (the file's base currency, where an answer gives costs: as the MCP server's answers name it)
       const named = result && typeof result === 'object' && !Array.isArray(result) && !(result as { error?: unknown }).error && namesCurrency(name, args ?? {}) ? withCurrency(getDb(), result as Record<string, unknown>) : result;
       window.p6.liveReply(id, { ok: true, result: named });

@@ -17,14 +17,7 @@ export function projectArgs(): { project?: string } {
   throw new Error(`Export analyses one project or all ${all.length} projects of the database; ${open.length} are open. Open one project, or all of them.`);
 }
 
-/** A number typed in a panel: nothing for an empty box (a refusal when `needed`), the number, or a refusal (shown as a toast) for text
- *  that is not one. */
-export function numberOf(label: string, text: string, needed = false): number | undefined {
-  if (text.trim() === '') { if (needed) throw new Error(`${label} is needed.`); return undefined; }
-  const n = Number(text);
-  if (!Number.isFinite(n)) throw new Error(`${label} must be a number.`);
-  return n;
-}
+export { numberOf } from './toolAnswers.ts';
 
 /** The tool whose export is running (the whole app has one at a time): kept here, not in a button, so a panel that is switched away
  *  from and back still shows it. */

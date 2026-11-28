@@ -7,6 +7,8 @@ import { assignResource } from '../../core/resource/assign.ts';
 import { applyOps } from '../../core/project/ops.ts';
 import { findingsText, parseFile } from '../io.ts';
 import type { Finding } from '../../core/findings.ts';
+import { dayHours } from '../../core/project/units.ts';
+import { p6num } from '../../core/schedule/cpm.ts';
 
 export function ColumnsDialog() {
   const ui = useStore((s) => s.ui);
@@ -89,7 +91,7 @@ export function AssignDialog(props: { which: 'pred' | 'succ' }) {
   const [q, setQ] = useState('');
   const [sel, setSel] = useState<string[]>([]);
   const cur = ui.selTask;
-  const list = useMemo(() => rows(db, 'TASK').filter((t) => (ui.openProjects.includes(t.proj_id) || q.length > 1) && t.task_id !== cur && (!q || (t.task_code + ' ' + t.task_name).toLowerCase().includes(q.toLowerCase()))).slice(0, 2000), [db, ui.openProjects, q, cur]);
+  const list = useMemo(() => rows(db, 'TASK').filter((t) => (ui.openProjects.includes(t.proj_id) || q.length > 1) && t.task_id !== cur && (!q || (t.task_code + ' ' + t.task_name).toLowerCase().includes(q.toLowerCase()))), [db, ui.openProjects, q, cur]); // every match (item 26: the first 2,000 hid the rest)
   if (!cur) return <Dialog title="Assign" buttons={<button className="btn" onClick={closeDialog}>Close</button>}><p>Select an activity first.</p></Dialog>;
   const assign = () => {
     const errs: string[] = [];
@@ -133,7 +135,7 @@ export function AssignResourceDialog() {
       <input placeholder="Search resources" value={q} onChange={(e) => setQ(e.target.value)} style={{ width: '100%', marginBottom: 6, border: '1px solid #7f9db9', height: 21 }} />
       <div className="tblwrap" style={{ height: 340 }}>
         <table className="tbl"><thead><tr><th>Resource ID</th><th>Resource Name</th><th>Type</th><th>Default Units/Time</th></tr></thead><tbody>
-          {rs.map((r) => <tr key={r.rsrc_id} className={sel === r.rsrc_id ? 'sel' : ''} onMouseDown={() => setSel(r.rsrc_id)}><td>{r.rsrc_short_name}</td><td>{r.rsrc_name}</td><td>{RSRC_TYPES[r.rsrc_type] ?? r.rsrc_type}</td><td>{Number(r.def_qty_per_hr || 1) * 8}h/d</td></tr>)}
+          {rs.map((r) => <tr key={r.rsrc_id} className={sel === r.rsrc_id ? 'sel' : ''} onMouseDown={() => setSel(r.rsrc_id)}><td>{r.rsrc_short_name}</td><td>{r.rsrc_name}</td><td>{RSRC_TYPES[r.rsrc_type] ?? r.rsrc_type}</td><td>{p6num(Number(r.def_qty_per_hr || 1) * (ui.prefs.calendarDays ? dayHours(getDb(), ui.prefs.hoursPerDay, true).cal(r.clndr_id) : ui.prefs.hoursPerDay))}h/d</td></tr>)}
           {!rs.length && <tr><td colSpan={4} className="muted">No resources. Create them in Enterprise &gt; Resources.</td></tr>}
         </tbody></table>
       </div>
@@ -186,7 +188,7 @@ export function PreferencesDialog() {
     <Dialog title="User Preferences" width={460} buttons={<><button className="btn primary" onClick={() => { setUi({ prefs: p }); closeDialog(); }}>OK</button><button className="btn" onClick={closeDialog}>Cancel</button></>}>
       <fieldset><legend>Time Units</legend>
         <div className="form" style={{ gridTemplateColumns: 'auto 1fr' }}>
-          <label>Hours per day (duration display)</label><input type="number" value={p.hoursPerDay} onChange={(e) => setP({ ...p, hoursPerDay: Number(e.target.value) || 8 })} />
+          <label>Hours per day (duration display)</label><input type="number" value={p.hoursPerDay} onChange={(e) => { const n = Number(e.target.value); if (e.target.value.trim() && n > 0 && n <= 24) setP({ ...p, hoursPerDay: n }); else toast('Hours per day must be a number above 0 and at most 24.'); }} />
           <label>Decimals</label><select value={p.durationDecimals} onChange={(e) => setP({ ...p, durationDecimals: Number(e.target.value) })}><option value={0}>0</option><option value={1}>1</option><option value={2}>2</option></select>
         </div>
       </fieldset>

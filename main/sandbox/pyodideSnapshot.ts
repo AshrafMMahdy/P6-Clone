@@ -190,6 +190,7 @@ export class SnapshotStore {
       const d = join(this.dir, name);
       let meta: SnapMeta;
       try { meta = JSON.parse(readFileSync(join(d, 'meta.json'), 'utf8')) as SnapMeta; } catch { rmSync(d, { recursive: true, force: true }); continue; }
+      // AGREED LIMIT (owner, 2026-11-28): 7 × the keep time — the note that a saved state was lost is kept this long — why: item 26 rule 5, "Timers, memory, and safety - agreed" — arbitrary by agreement.
       if (meta.status !== 'saved') { if (now - meta.at > this.keepMs * 7) rmSync(d, { recursive: true, force: true }); continue; }
       let size = 0;
       for (const f of ['files.tar.gz', 'vars.tar.gz']) { try { size += statSync(join(d, f)).size; } catch { /* absent */ } }
@@ -237,6 +238,7 @@ export async function saveSession(s: SandboxSession, store: SnapshotStore, why: 
       if (vInfo.bytes > remaining) varsLost = `the variables are ${mbText(vInfo.bytes)} packed, over the ${mbText(store.fileLimit)} a saved session may take`;
       else { await pull(s, VARS_ARC, join(builder.dir, 'vars.tar.gz'), vInfo.bytes); hasVars = true; remaining -= vInfo.bytes; }
     }
+    // AGREED LIMIT (owner, 2026-11-28): 30 s — the clean-up step of a snapshot — why: item 26 rule 5, "Timers, memory, and safety - agreed" — arbitrary by agreement.
     await s.runInternal(CLEANUP_PY, 30_000).catch(() => undefined);
     builder.commit({ status: 'saved', at, reason: why.told, hasVars, varsLost, files: fInfo.files, bytes: fInfo.bytes });
     o.log(`session ${s.id}: saved before it was ended (${fInfo.files} files, ${mbText(fInfo.bytes)}${hasVars ? ', variables' : ', no variables: ' + varsLost})`);
@@ -295,6 +297,7 @@ export async function restoreSession(s: SandboxSession, store: SnapshotStore, o:
   };
   try {
     await push(s, store.path(s.id, 'files.tar.gz'), '/tmp/__whiq_state.bin');
+    // AGREED LIMIT (owner, 2026-11-28): 10 min — a restore step over it fails, said ("could not be put back") — why: item 26 rule 5, "Timers, memory, and safety - agreed" — arbitrary by agreement.
     const f = await s.runInternal(RESTORE_FILES_PY, 10 * 60_000, true);
     const fm = /WHIQ_RESTORED (\{.*\})/.exec(f.stdout);
     if (f.error || !fm) return fail(`its files: ${f.error ?? 'no answer'}`);

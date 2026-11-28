@@ -131,6 +131,7 @@ export const undoLabel = () => undo[undo.length - 1]?.label;
 let saveTimer: ReturnType<typeof setTimeout> | undefined;
 function scheduleSave(): void {
   clearTimeout(saveTimer);
+  // AGREED LIMIT (owner, 2026-11-28): 800 ms — the database is written this long after the last change (panel runs save first) — why: item 26 rule 5, "Timers, memory, and safety - agreed" — arbitrary by agreement.
   saveTimer = setTimeout(saveNow, 800);
 }
 /** Saves the database now; whether it was written (false: it changed while saving, so the old file stays and the save that change scheduled writes it). */

@@ -14,6 +14,7 @@ import { ExportButton } from './ExportButton.tsx';
 import { tiaFragnetOps, type FragAct, type FragRel } from './tiaFragnet.ts';
 
 const Id = ({ id }: { id: string }) => <a href="#" onClick={(e) => { e.preventDefault(); goToActivity(id); }}>{id}</a>;
+// AGREED LIMIT (owner, 2026-11-28): 12 IDs in a line, then "… +N" — why: item 26 rule 3, "Lists inside Answers, Agreed" — arbitrary by agreement (screen space; the count of the rest is shown).
 const Ids = ({ ids, max = 12 }: { ids: string[]; max?: number }) => <>{ids.slice(0, max).map((c, i) => <span key={c}>{i ? ', ' : ''}<Id id={c} /></span>)}{ids.length > max ? ` … +${ids.length - max}` : ''}</>;
 const box = { display: 'flex', flexDirection: 'column', gap: 6, height: '100%', minHeight: 0 } as const;
 const bar = { display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' } as const;

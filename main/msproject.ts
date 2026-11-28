@@ -8,10 +8,10 @@ import { cpuCovering, externalWatch, pidsNamed, StuckError, type StuckInfo } fro
 
 export const MSP_REQUIRED = 'Microsoft Project must be installed to import/export .mpp files (Primavera P6 has the same requirement)';
 // No fixed time limit on the conversion (owner rule 2026-10-28; it was 120 s whatever the file's size). Microsoft Project is opaque
-// (a COM call reports nothing), so it is watched from outside (liveness.ts externalWatch): ended past a work bound (the input's
-// size x MSPROJECT_S_PER_MB in heartbeat.mjs x this machine's factor x 10, never under the floor; the output growing while it saves
-// resets the clock), or when neither PowerShell nor Project (WINPROJ.EXE, started through COM: not PowerShell's child) used
-// processor time and nothing was written for two windows: Project waits on a dialog nobody can see.
+// (a COM call reports nothing), so it is watched from outside (liveness.ts externalWatch, the one rule that ends work): it is ended
+// only when neither PowerShell nor Project (WINPROJ.EXE, started through COM: not PowerShell's child) used processor time and nothing
+// was written for two windows (the output growing while it saves is progress): Project waits on a dialog nobody can see.
+// AGREED LIMIT (owner, 2026-11-28): the liveness windows (5 s; frozen after 2 idle windows, 3 unread) — a conversion is ended as frozen, said (mspStuck) — why: item 26 rule 5, "Timers, memory, and safety - agreed" — the owner's rule of 2026-10-28 and decision of 2026-11-08 (no time limit, liveness only).
 /** The process Microsoft Project runs as. */
 export const MSPROJECT_EXE = 'WINPROJ.EXE';
 
@@ -74,6 +74,7 @@ export function mspStuck(direction: ConvertDirection, stuck: StuckInfo): StuckEr
 /** Human message for a failed conversion. */
 export function convertError(direction: ConvertDirection, code: number | null, stderr: string, stuck: StuckInfo | null = null): string {
   const what = direction === 'mppToXml' ? 'import the .mpp file' : 'save the .mpp file';
+  // AGREED LIMIT (owner, 2026-11-28): 400 characters — Microsoft Project's error text in the message — why: item 26 rule 5, "Timers, memory, and safety - agreed" — arbitrary by agreement.
   const detail = stderr.replace(/\s+/g, ' ').trim().slice(0, 400).replace(/[.\s]+$/, '');
   if (stuck) return mspStuck(direction, stuck).message;
   if (code === EXIT.noProject || /MSPROJECT_NOT_AVAILABLE|ENOENT/.test(detail)) return `${MSP_REQUIRED}. Microsoft Project could not be started on this computer${detail ? ` (${detail.replace(/^MSPROJECT_NOT_AVAILABLE:\s*/, '')})` : ''}.`;

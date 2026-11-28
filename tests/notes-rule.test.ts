@@ -128,7 +128,7 @@ const MORE = async (c: (tool: string, args: Record<string, unknown>) => Promise<
   return [
     ['find_activities', { handle: h, limit: 3 }], ['get_activity', { handle: h, activity_id: first }], ['trace_logic', { handle: h, activity_id: first }], ['activity_table', { handle: h, limit: 3 }],
     ['list_wbs', { handle: h }], ['list_dictionaries', { handle: h }], ['resource_summary', { handle: h }], ['list_projects', { handle: h }], ['list_tables', { handle: h }], ['read_table', { handle: h, table: 'TASK', limit: 3 }],
-    ['run_report', { handle: h, report: 'Schedule Report' }], ['export_excel', { handle: h, path: `${dir}/rules.xlsx` }], ['evaluate', { handle: h, overrides: [{ op: 'update_activity', id: first, duration_days: 3 }] }],
+    ['run_report', { handle: h, report: 'Schedule Report (by WBS)' }], ['export_excel', { handle: h, path: `${dir}/rules.xlsx` }], ['evaluate', { handle: h, overrides: [{ op: 'update_activity', id: first, duration_days: 3 }] }],
     ['transfer_progress', { handle: h, other_handle: h2, dry_run: true }], ['import_file', { handle: h, other_handle: h2, action: 'update', dry_run: true }],
     ['compute_schedule', { start: '2026-03-02', activities: [{ id: 'A', duration_days: 2 }, { id: 'B', duration_days: 3 }], relationships: [{ pred: 'A', succ: 'B' }] }],
   ] as [string, Record<string, unknown>][];

@@ -6,6 +6,7 @@ import { checkSchedule, P6_CHECKS, type CheckScheduleReport } from '../../core/a
 import { analysisReportHtml } from '../../core/analysis/report.ts';
 import { nowStamp } from '../../core/report/reports.ts';
 import { AnalysisResults } from '../views/AnalysisResults.tsx';
+import { numberOf } from '../views/ExportButton.tsx';
 
 export function CheckScheduleDialog() {
   const ui = useStore((s) => s.ui);
@@ -18,9 +19,14 @@ export function CheckScheduleDialog() {
     const checks = P6_CHECKS.filter((c) => on[c.id]).map((c) => c.id);
     if (!checks.length) return toast('Select at least one check.');
     const t: Record<string, number> = {};
-    for (const c of P6_CHECKS) { const v = Number(targets[c.id]); if (Number.isFinite(v) && v !== c.th.value) t[c.id] = v; }
-    const d = Number(days);
-    setReport(checkSchedule(getDb(), { projIds: ui.openProjects, hoursPerDay: ui.prefs.hoursPerDay, checks, targets: t, thresholdHours: (Number.isFinite(d) && d > 0 ? d : 44) * ui.prefs.hoursPerDay }));
+    // the Extensions panel's rule (item 26: this dialog ignored a target that was not a number and turned bad days into 44)
+    let d: number;
+    try {
+      for (const c of P6_CHECKS) { const v = numberOf(`The target of ${c.name}`, targets[c.id], true)!; if (v !== c.th.value) t[c.id] = v; }
+      d = numberOf('The number of days for long lags, large float and large durations', days, true)!;
+      if (!(d > 0)) throw new Error('The number of days for long lags, large float and large durations must be more than 0.');
+    } catch (e) { return toast((e as Error).message); }
+    setReport(checkSchedule(getDb(), { projIds: ui.openProjects, hoursPerDay: ui.prefs.hoursPerDay, checks, targets: t, thresholdHours: d * ui.prefs.hoursPerDay }));
   };
   const save = async () => {
     if (!report) return;

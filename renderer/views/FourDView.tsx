@@ -11,6 +11,7 @@ import { applyImport, planImport } from '../../core/bim/import4d.ts';
 import { viewerTimeline } from '../../core/bim/sim4d.ts';
 import { writeP6Xml } from '../../core/xml/p6xml.ts';
 import type { IfcIndex } from '../../core/bim/parse.ts';
+import { LISTED } from '../../core/notes.ts';
 
 type Loaded = { hash: string; path: string; index: IfcIndex; url: string | null };
 const loaded = new Map<string, Loaded>(); // by project: the model this session has read
@@ -134,8 +135,10 @@ export function FourDPanel() {
   const video = async () => {
     if (!m?.url || !timeline) return;
     toast('Rendering the video on this computer…');
+    // AGREED LIMIT (owner, 2026-11-28): a week a frame, 4 frames a second, 1280 x 720 — the 4D window's video, said when saved — why: item 26 rule 4, "Defaults - agreed" — arbitrary by agreement (the agent's render_4d chooses its own).
     const r = await window.p6.bimVideo({ hash: m.hash, timeline: viewerTimeline(db, projId, m.index, [...new Set([source, 'best', 'planned'])]), options: { left: source, overlays: ['date', 'legend', 'activity_list', 'gantt_strip'], view: 'iso' }, step: 7, fps: 4, name: `${proj.proj_short_name}-4D` });
-    toast(r.ok ? (r.saved ? `Saved ${r.saved} (${r.frames} frames).` : 'Not saved.') : `Video failed: ${r.error}`);
+    // the video's fixed form is said (item 26, desktop C37): a week a frame, 4 frames a second, 1280 x 720
+    toast(r.ok ? (r.saved ? `Saved ${r.saved}: ${r.frames} frames, a week a frame, 4 frames a second, 1280 × 720.` : 'Not saved.') : `Video failed: ${r.error}`);
   };
   const onPick = (g: string | null, add: boolean) => setPicked((p) => (!g ? (add ? p : []) : add ? (p.includes(g) ? p.filter((x) => x !== g) : [...p, g]) : [g]));
   const pickedEl = picked.length === 1 ? m?.index.elements.find((e) => e.guid === picked[0]) : undefined;
@@ -170,13 +173,13 @@ export function FourDPanel() {
             <fieldset><legend>Link by rules</legend>
               <textarea value={rules} onChange={(e) => setRules(e.target.value)} rows={4} style={{ width: '100%', fontFamily: 'monospace', fontSize: 11 }} />
               <div style={bar}><button onClick={() => runRules(true)}>Dry run</button><button onClick={() => runRules(false)}>Apply</button></div>
-              {preview != null && <pre style={{ fontSize: 10, maxHeight: 160, overflow: 'auto' }}>{JSON.stringify(preview, null, 1).slice(0, 4000)}</pre>}
+              {preview != null && <pre style={{ fontSize: 10, maxHeight: 160, overflow: 'auto' }}>{JSON.stringify(preview, null, 1)}</pre>}
             </fieldset>
             <fieldset><legend>Exchange</legend>
               <div style={bar}><select value={target} onChange={(e) => setTarget(e.target.value as typeof target)}><option value="navisworks">Navisworks (IFC, search sets, TimeLiner CSV)</option><option value="synchro">SYNCHRO (IFC + P6 XML)</option><option value="ifc4d">IFC4 4D (Bonsai)</option><option value="csv">Links CSV</option></select><button onClick={() => void exportPkg()}>Export…</button></div>
               <div style={bar}><button onClick={() => void importPkg()}>Import 4D…</button><span className="muted" style={{ fontSize: 11 }}>IFC 4D, search sets, TimeLiner CSV/xlsx, .nwf/.nwd, SYNCHRO .sp</span></div>
             </fieldset>
-            {status?.activities_without_elements.length ? <div className="muted" style={{ fontSize: 11 }}>No elements yet: {status.activities_without_elements.slice(0, 20).map((id) => <a key={id} href="#" onClick={(e) => { e.preventDefault(); const t = rows(getDb(), 'TASK').find((x) => x.task_code === id && x.proj_id === projId); if (t) setUi({ selTasks: [t.task_id], selTask: t.task_id }); }}>{id} </a>)}</div> : null}
+            {status?.activities_without_elements.length ? <div className="muted" style={{ fontSize: 11 }}>No elements yet ({status.activities_without_elements.length}): {status.activities_without_elements.slice(0, LISTED).map((id) => <a key={id} href="#" onClick={(e) => { e.preventDefault(); const t = rows(getDb(), 'TASK').find((x) => x.task_code === id && x.proj_id === projId); if (t) setUi({ selTasks: [t.task_id], selTask: t.task_id }); }}>{id} </a>)}{status.activities_without_elements.length > LISTED ? ` and ${status.activities_without_elements.length - LISTED} more` : ''}</div> : null}
           </div>
         </div>
       </>}

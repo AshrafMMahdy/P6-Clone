@@ -46,6 +46,7 @@ async function main(): Promise<{ out: unknown; isError: boolean }> {
   const { db } = reader.finish();
   if (!db?.tables) throw new Error(`${req.file} holds no database.`);
   // a call that outlasts the soft time becomes a job there; here the answer is what is waited for
+  // AGREED LIMIT (owner, 2026-11-28): 2^31-1 ms — the screens wait for their answer (the MCP's 25 s soft timeout off) — why: item 26 rule 6, "Necessary limits - agreed" — necessary because it is the largest timer value.
   config.softTimeoutMs = 2 ** 31 - 1;
   config.screens = true; // this child answers the app's own screens (the Monte Carlo grid and chart read whole lists)
   // each session is charged for what it holds (as runtime.ts regrow estimates a grown project: from its row count), and the handle

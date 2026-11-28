@@ -6,6 +6,7 @@ import { rows } from '../../core/db.ts';
 import type { CheckResult } from '../../core/analysis/common.ts';
 import type { Fix, LintCheck } from '../../core/analysis/lint.ts';
 import { fmtMetric, fmtTarget } from '../../core/analysis/report.ts';
+import { LISTED } from '../../core/notes.ts';
 
 const RESULT = { pass: 'Pass', fail: 'Fail', not_assessed: 'Not assessed', warn: 'Warning' } as const;
 const COLOR = { pass: '#1d6b2d', fail: '#a01818', not_assessed: '#777', warn: '#a06a00' } as const;
@@ -43,7 +44,7 @@ export function AnalysisResults({ checks, onGo, onApplyFix }: { checks: (CheckRe
                   {c.activities.map((a, i) => <tr key={i}><td>{/ -> /.test(a.id) ? <>{link(a.id.split(' -> ')[0])} → {link(a.id.split(' -> ')[1])}</> : link(a.id)}</td><td>{a.name}</td><td className="muted">{a.value ?? ''}</td></tr>)}
                 </tbody></table>}
                 {c.total_activities > c.activities.length && <div className="muted" style={{ fontSize: 11 }}>{c.total_activities - c.activities.length} more not listed.</div>}
-                {'fixes' in c && c.fixes?.length ? <div style={{ marginTop: 6 }}><b>Fixes</b>{c.fixes.slice(0, 50).map((f, i) => <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '2px 0' }}>{onApplyFix && <button className="btn" style={{ minWidth: 0, padding: '0 8px' }} onClick={() => onApplyFix(f)}>Apply</button>}<span>{f.fix}{f.saves_days != null ? ` (saves ${f.saves_days} d)` : ''}</span></div>)}</div> : null}
+                {'fixes' in c && c.fixes?.length ? <div style={{ marginTop: 6 }}><b>Fixes</b>{c.fixes.slice(0, LISTED).map((f, i) => <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '2px 0' }}>{onApplyFix && <button className="btn" style={{ minWidth: 0, padding: '0 8px' }} onClick={() => onApplyFix(f)}>Apply</button>}<span>{f.fix}{f.saves_days != null ? ` (saves ${f.saves_days} d)` : ''}</span></div>)}{c.fixes.length > LISTED && <div className="muted" style={{ fontSize: 11 }}>{c.fixes.length - LISTED} more fixes: Export… lists them all.</div>}</div> : null}
               </td></tr>
             ),
           ])}

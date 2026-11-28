@@ -8,6 +8,7 @@ import { PHASE_PROTO, TRADE_PROTO } from './tables.ts';
 import { pyStr, truthy, type Rec } from './pyutil.ts';
 
 const DEFAULT_ROUTER_URL = 'http://127.0.0.1:5009';
+// AGREED LIMIT (owner, 2026-11-28): 10 s a call, 100 a chunk, confidence 0.5, 60 s back-off — the decide seat; when it fails or is unsure the trades are read by keyword, said once on stderr only (see ledger item 26, the embedded agent's pin) — why: item 26 rule 7, "Analysis thresholds - agreed as long as it is visible" — arbitrary by agreement.
 const TIMEOUT_MS = 10_000;   // Jev answers in tens of milliseconds; the bound is for a cold or absent router
 const MIN_CONFIDENCE = 0.5;   // below this the caller keeps its own fallback for that question
 const CHUNK = 100;            // 200 questions per call

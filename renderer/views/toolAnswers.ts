@@ -116,12 +116,25 @@ export const riskRowText = (r: MonteCarloResult['risks'][number], hoursPerDay: n
 export const criticalityCell = (a: { criticality: number }) => ({ text: `${Math.round(a.criticality)}%`, critical: a.criticality >= 50, bar: `${a.criticality}%` });
 export const sensitivityText = (v: number | null): string => (v == null ? '' : v.toFixed(2));
 
+/** A number typed in a panel: nothing for an empty box (a refusal when `needed`), the number, or a refusal (shown as a toast) for text
+ *  that is not one. */
+export function numberOf(label: string, text: string, needed = false): number | undefined {
+  if (text.trim() === '') { if (needed) throw new Error(`${label} is needed.`); return undefined; }
+  const n = Number(text);
+  if (!Number.isFinite(n)) throw new Error(`${label} must be a number.`);
+  return n;
+}
+
+
 // ---------------------------------------------------------------- Crashing (crash_schedule)
 export interface CrashSettings { mode: 'days' | 'date' | 'cost'; days: string; date: string; indirect: string; ld: string; pct: string; data: Record<string, { min: string; cost: string }> }
 /** crash_schedule's arguments from the Crashing panel's settings (the Export's too). No step limit: the tool has none. */
 export function crashArgs(s: CrashSettings): Record<string, unknown> {
-  const acts = Object.entries(s.data).filter(([, v]) => v.min !== '' || v.cost !== '').map(([id, v]) => ({ id, min_days: Number(v.min) || 0, cost_per_day: Number(v.cost) || 0 }));
-  return { ...(s.mode === 'days' ? { target_days: Number(s.days) } : {}), ...(s.mode === 'date' ? { target_finish: s.date.replace('T', ' ') } : {}), ...(Number(s.indirect) ? { indirect_cost_per_day: Number(s.indirect) } : {}), ...(Number(s.ld) ? { ld_per_day: Number(s.ld) } : {}), ...(acts.length ? { activities: acts } : {}), default_max_pct: Number(s.pct) || 30 };
+  // every box holds a number or is refused in words (item 26: a cleared box or text became 0 or 30 silently); an empty optional box is not sent
+  const nonNeg = (label: string, text: string, needed = false) => { const n = numberOf(label, text, needed); if (n != null && n < 0) throw new Error(`${label} cannot be negative.`); return n; };
+  const acts = Object.entries(s.data).filter(([, v]) => v.min !== '' || v.cost !== '').map(([id, v]) => ({ id, ...(v.min !== '' ? { min_days: nonNeg(`${id}'s shortest duration`, v.min) } : {}), ...(v.cost !== '' ? { cost_per_day: nonNeg(`${id}'s cost a day`, v.cost) } : {}) }));
+  const indirect = nonNeg('The indirect cost a day', s.indirect), ld = nonNeg('The damages a day', s.ld), pct = nonNeg('The default shortening', s.pct, true)!;
+  return { ...(s.mode === 'days' ? { target_days: nonNeg('The days to gain', s.days, true) } : {}), ...(s.mode === 'date' ? { target_finish: s.date.replace('T', ' ') } : {}), ...(indirect ? { indirect_cost_per_day: indirect } : {}), ...(ld ? { ld_per_day: ld } : {}), ...(acts.length ? { activities: acts } : {}), default_max_pct: pct };
 }
 /** The line a stopped crash_schedule run shows (stop CANCELLED: the steps done, nothing applied); null for a run that ended by itself. */
 export const crashStopped = (out: Record<string, any>): string | null =>
@@ -166,6 +179,7 @@ export function levelInProposedOrder(d: Db, projIds: string[], priority: Priorit
 }
 /** How many of the placement order the Optimize panel lists, as it always did (the tool's own default of 100): the line is "first 100 of N", and
  *  Apply levels in the whole order the answer holds, not in these. */
+// AGREED LIMIT (owner, 2026-11-28): 100 — the Optimize panel lists the first 100 of the placement order, its heading says "first 100 of N"; Apply levels in the whole order — why: item 26 rule 3, "Lists inside Answers, Agreed" — arbitrary by agreement (screen space).
 export const PRIORITY_SHOWN = 100;
 export function priorityShown(priority: PriorityEntry[], total: number): { heading: string; entries: PriorityEntry[] } {
   return { heading: `Priority (${total > PRIORITY_SHOWN ? `first ${PRIORITY_SHOWN} of ${total}` : total})`, entries: priority.slice(0, PRIORITY_SHOWN) };

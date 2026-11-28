@@ -17,7 +17,7 @@ index 1d0b64e..aaefd3f 100644
    const mine = agentTier && order.includes(agentTier) ? order.indexOf(agentTier) : -1;
 -  const want = (requested ?? 'up').trim();
 +  // P6 Clone: the Handover seat names where a handover with no tier goes, when that tier is at or above this chat's own
-+  const seat = process.env.WHIQ_HANDOVER_TIER?.trim();
++  const seat = process.env.WHIQ_HANDOVER_TIER?.trim(); // AGREED LIMIT (owner, 2026-11-28): a handover with no tier goes to the Handover seat's tier, when it is at or above the chat's own (the settings dialog names the seat) — why: item 26 rule 4, "Defaults - agreed" — the owner's seat design.
 +  const want = (requested ?? (seat && order.includes(seat) && (mine < 0 || order.indexOf(seat) <= mine) ? seat : 'up')).trim();
    if (want === 'up' || want === '') {
      const i = mine < 0 ? 0 : Math.max(mine - 1, 0);

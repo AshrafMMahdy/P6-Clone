@@ -30,7 +30,7 @@ export const LIVE_TOOLS: ToolDef[] = [
   { name: 'edit_project', description: 'Change the open project, or create a new one, with JSON operations. Each call is one undoable step (all or nothing: if one operation fails nothing changes and the error names it); changed activities are selected so the user sees them; deleting asks the user first. A batch that starts with add_project (or copy_project) creates that project and opens it on screen; later operations in the batch and later calls go to it. Build big schedules in several calls (about one WBS area, 30-60 operations, per call).\n' + OP_GUIDE, parameters: { type: 'object', properties: { operations: { type: 'array', items: { type: 'object', properties: { op: { type: 'string', enum: OP_NAMES } }, required: ['op'] } } }, required: ['operations'] } },
   { name: 'set_print_options', description: 'Change File > Page Setup for printing / PDF of the Activities layout (saved; the user then prints or saves). Returns the settings, the page count and the printable column ids. Afterwards open File > Print Preview, or File > Print... / File > Save as PDF... so the user can press Print or Save themselves.\n' + PRINT_GUIDE, parameters: { type: 'object', properties: { settings: { type: 'object' } }, required: ['settings'] } },
   { name: 'list_reports', description: 'The reports in Tools > Reports (P6 standard reports by group, and the user\'s own), with ids.', parameters: { type: 'object', properties: {} } },
-  { name: 'open_report', description: 'Show a report in the Reports window (the user sees it selected and previewed) and return its columns and rows so you can read and explain it. report: id or name from list_reports.', parameters: { type: 'object', properties: { report: { type: 'string' }, weeks: { type: 'number', description: 'lookahead weeks (Lookahead report)' }, max_rows: { type: 'number' } }, required: ['report'] } },
+  { name: 'open_report', description: 'Show a report in the Reports window (the user sees it selected and previewed) and return its columns and rows so you can read and explain it: every row, or offset / limit to read a part (total_rows says how many there are). report: id or name from list_reports.', parameters: { type: 'object', properties: { report: { type: 'string' }, weeks: { type: 'number', description: 'lookahead weeks (Lookahead report)' }, offset: { type: 'number', description: 'the first row to return (default 0)' }, limit: { type: 'number', description: 'how many rows (default: every one)' } }, required: ['report'] } },
   { name: 'create_report', description: 'Create a report with the Report Wizard ON SCREEN, step by step, so the user watches each page (subject area, columns, filter, group and sort, title) and you click Next and Finish. subject: activities | assignments | wbs | resources | relationships. columns: ids (activities: any activity column id such as task_code, task_name, start, finish, total_float, ev_bac, ev_pv, ev_ev, ev_spi, ev_cpi; other subjects: call with an empty columns list to see the defaults). filter: all, critical, longest, notstarted, inprogress, completed, open, milestones, negfloat, late, constrained, started30, finished30, starting30, finishing30, nopreds, or user:<id>. group_by: activities wbs|none; assignments resource|activity|none; resources none|type; relationships none|pred. sort_by: a column id; sort_desc. Saved in "My Reports".', parameters: { type: 'object', properties: { name: { type: 'string' }, subject: { type: 'string' }, columns: { type: 'array', items: { type: 'string' } }, filter: { type: 'string' }, group_by: { type: 'string' }, sort_by: { type: 'string' }, sort_desc: { type: 'boolean' }, title: { type: 'string' }, group: { type: 'string' } }, required: ['name', 'subject'] } },
   { name: 'run_report_dialog', description: 'Open the Run Report dialog for a report with the output chosen: preview (Print Preview), printer, pdf, html, text (ASCII/CSV) or excel. For preview you may then ui_click "OK"; for printer and files the user presses OK and chooses where to save.', parameters: { type: 'object', properties: { report: { type: 'string' }, output: { type: 'string' } }, required: ['report', 'output'] } },
   { name: 'undo', description: 'Undo the last change (Edit > Undo).', parameters: { type: 'object', properties: {} } },
@@ -215,7 +215,7 @@ export async function runLive(name: string, args: Record<string, any>, givenUp: 
         });
         let r!: ReturnType<typeof applyOps>;
         const before = new Set(rows(getDb(), 'TASK').map((t) => t.task_id));
-        mutate(`AI: ${ops.length} change(s)`, (d) => { r = applyOps(d, withProj, { hoursPerDay: getUi().prefs.hoursPerDay }); if (!r.ok) throw new Error(`operation ${r.error!.index + 1} (${(r.error!.op as { op?: string })?.op ?? '?'}): ${r.error!.message} Nothing in this call was applied.`); });
+        mutate(`AI: ${ops.length} change(s)`, (d) => { r = applyOps(d, withProj, { hoursPerDay: getUi().prefs.hoursPerDay, calendarDays: true }); if (!r.ok) throw new Error(`operation ${r.error!.index + 1} (${(r.error!.op as { op?: string })?.op ?? '?'}): ${r.error!.message} Nothing in this call was applied.`); });
         // a created project is opened on screen, like File > Open
         const created = withProj.filter((o: Record<string, unknown>) => o?.op === 'add_project' || o?.op === 'copy_project').at(-1) as { id?: string } | undefined;
         const newId = created && rows(getDb(), 'PROJECT').find((p) => p.proj_short_name === String(created.id).trim() && !p._baseline_of)?.proj_id;
@@ -235,25 +235,32 @@ export async function runLive(name: string, args: Record<string, any>, givenUp: 
       case 'open_report': {
         const ui0 = getUi();
         if (!ui0.openProjects.length) return { error: 'Open a project first.' };
-        const { entry, report } = runReport(getDb(), ui0.openProjects, String(args.report ?? ''), { prefs: ui0.prefs, weeks: Number(args.weeks) || undefined });
+        // weeks: a whole number from 1 to 26 when given (refused otherwise, not turned into 3)
+        if (args.weeks != null && !(Number.isInteger(args.weeks) && args.weeks >= 1 && args.weeks <= 26)) return { error: `weeks must be a whole number from 1 to 26 (got ${JSON.stringify(args.weeks)}).` };
+        const { entry, report } = runReport(getDb(), ui0.openProjects, String(args.report ?? ''), { prefs: ui0.prefs, weeks: args.weeks });
         setUi({ view: 'reports' });
         await sleep(400);
         const item = [...document.querySelectorAll<HTMLElement>('.report-item')].find((el) => el.textContent?.replace(/ \*$/, '') === entry.name);
         if (item) await clickEl(item); else setUi({ detailTab: entry.id });
-        const max = Math.min(200, Number(args.max_rows) || 60);
-        return { id: entry.id, name: entry.name, title: report.title, subtitle: report.subtitle, columns: report.columns, total_rows: report.rows.length, rows: report.rows.slice(0, max).map((r) => (r.bold ? { group: r.cells.find(Boolean) ?? '', level: r.level } : Object.fromEntries(report.columns.map((c, i) => [c, r.cells[i] ?? ''])))), truncated: report.rows.length > max };
+        // a reading tool returns what is asked: every row by default, offset / limit for a part (item 26, rule 3); wrong numbers are refused
+        const whole = (v: unknown, what: string) => (v == null ? undefined : typeof v === 'number' && Number.isInteger(v) && v >= 0 ? v : null) ?? (() => { throw new Error(`${what} must be a whole number of 0 or more.`); })();
+        const from = whole(args.offset, 'offset') ?? 0, count = whole(args.limit, 'limit');
+        return { id: entry.id, name: entry.name, title: report.title, subtitle: report.subtitle, columns: report.columns, total_rows: report.rows.length, ...(from || count != null ? { offset: from } : {}), rows: report.rows.slice(from, count != null ? from + count : undefined).map((r) => (r.bold ? { group: r.cells.find(Boolean) ?? '', level: r.level } : Object.fromEntries(report.columns.map((c, i) => [c, r.cells[i] ?? ''])))) };
       }
       case 'create_report': {
-        const subj = (Object.keys(SUBJECTS) as (keyof typeof SUBJECTS)[]).find((k) => k === args.subject) ?? 'activities';
+        // an unknown subject is refused with the subjects (item 26, rule 1: it built an activities report)
+        const subj = args.subject == null ? 'activities' : (Object.keys(SUBJECTS) as (keyof typeof SUBJECTS)[]).find((k) => k === args.subject);
+        if (!subj) return { error: `Unknown subject "${args.subject}"; subjects: ${Object.keys(SUBJECTS).join(', ')}.` };
         const spec = parseSpec({ ...args, subject: subj, columns: Array.isArray(args.columns) && args.columns.length ? args.columns : SUBJECTS[subj].defaultColumns });
         if (!spec) return { error: 'Give the report a name.' };
         const known = new Set(subjectColumns(getDb(), spec.subject).map((c) => c.id));
         const unknown = spec.columns.filter((c) => !known.has(c));
-        if (unknown.length) return { error: `Unknown column(s) for ${spec.subject}: ${unknown.join(', ')}`, columns: [...known].slice(0, 400) };
+        if (unknown.length) return { error: `Unknown column(s) for ${spec.subject}: ${unknown.join(', ')}`, columns: [...known] };
         if (spec.filter !== 'all' && !reportFilters(getDb()).some((f) => f.id === spec.filter)) return { error: `Unknown filter "${spec.filter}"`, filters: reportFilters(getDb()) };
         setUi({ view: 'reports' });
         openDialog('reportWizard', { preset: spec, runAfter: false });
         const top = () => [...document.querySelectorAll<HTMLElement>('.dialog')].at(-1);
+        // AGREED LIMIT (owner, 2026-11-28): 6 pages, 1.1 s apart — the Report Wizard is clicked through its six pages so the user can watch each — why: item 26 rule 5, "Timers, memory, and safety - agreed" — necessary because it is the wizard's page count; 1.1 s arbitrary by agreement.
         for (let step = 0; step < 6; step++) {
           await sleep(1100);
           const btn = [...(top()?.querySelectorAll<HTMLButtonElement>('button') ?? [])].find((b) => /^(Next >|Finish)$/.test(b.textContent?.trim() ?? ''));
@@ -267,7 +274,10 @@ export async function runLive(name: string, args: Record<string, any>, givenUp: 
       case 'run_report_dialog': {
         const e = listReports(getDb()).find((x) => x.id === args.report || x.name.toLowerCase() === String(args.report ?? '').toLowerCase());
         if (!e) return { error: `No report "${args.report}".` };
-        const out = ['preview', 'printer', 'pdf', 'html', 'text', 'excel'].includes(String(args.output)) ? String(args.output) : 'preview';
+        // an unknown output is refused with the outputs (item 26, rule 1: it opened a Print Preview)
+        const OUTPUTS = ['preview', 'printer', 'pdf', 'html', 'text', 'excel'];
+        if (!OUTPUTS.includes(String(args.output))) return { error: `Unknown output "${args.output}"; outputs: ${OUTPUTS.join(', ')}.` };
+        const out = String(args.output);
         setUi({ view: 'reports', detailTab: e.id });
         openDialog('runReport', { reportId: e.id, output: out });
         return { opened: 'Run Report', report: e.name, output: out };

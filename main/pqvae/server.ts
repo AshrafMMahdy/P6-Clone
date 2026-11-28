@@ -20,6 +20,7 @@ const send = (res: ServerResponse, code: number, obj: unknown): void => {
 };
 
 /** The largest request body taken (a 12,000-activity schedule is about 3 MB). */
+// AGREED LIMIT (owner, 2026-11-28): 64 MB — a request over it is refused ("request body is over 64 MB") — why: item 26 rule 6, "Necessary limits - agreed" — necessary because a server bounds what it reads; 64 MB arbitrary by agreement.
 export const MAX_BODY = 64 * 1024 * 1024;
 class TooBig extends Error {}
 

@@ -1,4 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, safeStorage } from 'electron';
+import { WINDOW_HEAP_MB } from './heap.ts';
 import { AiStore, chatWith, type AiConfig, type PublicModels } from './ai.ts';
 import { initModelsDev } from './modelsDev.ts';
 import { closeSync, copyFileSync, existsSync, mkdtempSync, openSync, readSync, writeSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
@@ -41,8 +42,7 @@ app.on('second-instance', () => {
 for (const m of moveLegacyData()) console.log(`[data] moved ${m} into ${dataRoot()}`);
 if (dataNote) console.log(`[data] ${dataNote}`);
 // Large programmes (100 MB XERs, 100k+ activities) are held in the window's memory: allow it more than V8's default.
-// AGREED LIMIT (owner, 2026-11-28): 12 GB — the window's heap; past it the window stops and says so ("The window stopped …") — why: item 26 rule 5, "Timers, memory, and safety - agreed" — necessary to raise V8's default; 12 GB arbitrary by agreement.
-app.commandLine.appendSwitch('js-flags', '--max-old-space-size=12288');
+app.commandLine.appendSwitch('js-flags', `--max-old-space-size=${WINDOW_HEAP_MB}`);
 // Background mode: started by a test or another program (a remote-debugging port, which Playwright always passes and a
 // person never does), with --background, or P6CLONE_BACKGROUND=1. The windows open minimized and never take the front
 // of the screen from what the user is doing; they keep rendering and running timers as if shown (owner, 2026-11-04).

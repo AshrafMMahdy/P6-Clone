@@ -31,7 +31,7 @@ index 0000000..a0ab1b4
 +const RESERVED = /^(con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³])$/i;
 +/** A name any file system takes (Windows included): no \ / : * ? " < > | or control characters, no reserved device name, no
 + *  trailing dot or space, at most `max` characters, never empty. */
-+export function safeName(raw: string, max = 60, fallback = 'memory'): string {
++export function safeName(raw: string, max = 60, fallback = 'memory'): string { // AGREED LIMIT (owner, 2026-11-28): 60 characters (a project folder 60, an id suffix 20) — memory file and folder names, cut on a word boundary — why: item 26 rule 6, "Necessary limits - agreed" — necessary because file names have a length limit; the numbers arbitrary by agreement.
 +  let s = raw.normalize('NFC').replace(/[\\/:*?"<>|\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim();
 +  if (s.length > max) { const cut = s.slice(0, max); s = cut.slice(0, Math.max(cut.lastIndexOf(' '), Math.floor(max / 2))).replace(/[\ud800-\udbff]$/, ''); }   // a word boundary when there is one
 +  s = s.replace(/^[.\s]+|[.\s]+$/g, '');
@@ -101,7 +101,7 @@ index 0000000..a0ab1b4
 +  const lines = src.split(/\r?\n/);
 +  if (lines[0]?.trimEnd() !== '---') {
 +    const text = src.trim();   // no front matter: the whole file is the text of a new entry
-+    if (text.length < 4) return { ok: false, why: 'it holds no text' };
++    if (text.length < 4) return { ok: false, why: 'it holds no text' }; // AGREED LIMIT (owner, 2026-11-28): 4 characters — a memory file with less text is not an entry (left as it is, logged) — why: item 26 rule 6, "Necessary limits - agreed" — arbitrary by agreement.
 +    return { ok: true, noId: true, item: { id: '', text, kind: folderKind, createdAt: mtime } };
 +  }
 +  const end = lines.findIndex((l, i) => i > 0 && l.trimEnd() === '---');
@@ -210,7 +210,7 @@ index 7353b85..90bbd62 100644
 +/** The folder this store loaded: the variable is read once per run in practice, and a store never writes into another folder. */
 +let mdRoot = '';
 +let mdFaultTold = false;
-+const MD_RESCAN_MS = 1_000;
++const MD_RESCAN_MS = 1_000; // AGREED LIMIT (owner, 2026-11-28): 1 s — hand edits to the memory folder are seen within it — why: item 26 rule 5, "Timers, memory, and safety - agreed" — arbitrary by agreement.
 +const sha = (s: string): string => createHash('sha1').update(s).digest('hex');
 +const sigOf = (abs: string): string => { try { const s = statSync(abs); return `${s.mtimeMs}:${s.size}`; } catch { return ''; } };
 +const mdLog = (what: string, why: unknown, code = 'memory_load_failed'): void => {

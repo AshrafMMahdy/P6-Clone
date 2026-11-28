@@ -18,6 +18,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ExportRequest } from './analysis-export.ts';
 import { answerOf, cancelRun, endedAnswer, matchesCancel, makeRunDir, refused, removeLeftBehind, removeRunDir, type ExportAnswer } from './analysis-run-control.ts';
+import { WINDOW_HEAP_MB } from './heap.ts';
 export type { ExportAnswer };
 
 /** The child's own file, beside this bundle (dist/ in development and in the packaged app). */
@@ -55,7 +56,8 @@ function runChild(req: ExportRequest, dir: string, onProgress?: (p: { done: numb
     // cwd and TEMP: the export's private folder, where a long run keeps its work in progress (Monte Carlo iterations, scenarios)
     // the .mpp reader in the packaged app is the one the p6clone engine ships (the repository's .cache/mpxj in development)
     const mpxj = app.isPackaged ? { P6CLONE_MPXJ: join(process.resourcesPath, 'whiq-agent', 'engines', 'p6clone', 'mpxj') } : {};
-    const child = spawn(process.execPath, ['-e', `require(${JSON.stringify(entry)})`], { cwd: dir, env: { ...process.env, ...mpxj, ELECTRON_RUN_AS_NODE: '1', TEMP: dir, TMP: dir, TMPDIR: dir }, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+    // the child's heap and memory budget are the window's (a project the window holds is not refused here)
+    const child = spawn(process.execPath, [`--max-old-space-size=${WINDOW_HEAP_MB}`, '-e', `require(${JSON.stringify(entry)})`], { cwd: dir, env: { ...process.env, ...mpxj, P6CLONE_MEM_BUDGET_MB: String(WINDOW_HEAP_MB), ELECTRON_RUN_AS_NODE: '1', TEMP: dir, TMP: dir, TMPDIR: dir }, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
     if (current) current.child = child;
     // stdout: progress lines ({"progress": ...}), then the answer (the last line)
     const others: string[] = [], err: Buffer[] = [];
@@ -89,6 +91,7 @@ function written(folder: string, tool: string, since: number): string[] {
 export function registerAnalysisExport(getWin: () => BrowserWindow | null, dbFile: () => string): void {
   /** null when the folder dialog is cancelled. */
   ipcMain.handle('analysis:export', async (_e, tool: string, args: Record<string, unknown>, hoursPerDay: number, parts?: { scope?: string[]; others?: Record<string, string[]> }): Promise<ExportAnswer | null> => {
+    // AGREED LIMIT (owner, 2026-11-28): one export or panel run at a time for the app, said ("A run of <tool> is already running …") — why: item 26 rule 6, "Necessary limits - agreed" — necessary because each run holds a copy of the project in a child process.
     if (current) return busy(current);
     const mine: Current = current = { tool, child: null, dir: null, cancelled: false, ended: false, exporting: true, keepWork: false };
     try {
@@ -107,6 +110,7 @@ export function registerAnalysisExport(getWin: () => BrowserWindow | null, dbFil
   /** A panel's analysis run as its tool, without export, in the same child on the saved database: the tool's answer (the panel
    *  passes the arguments of a call that changes nothing, as Export does). */
   ipcMain.handle('analysis:run', async (_e, tool: string, args: Record<string, unknown>, hoursPerDay: number, parts?: { scope?: string[]; others?: Record<string, string[]> }, keepWork?: boolean, id?: string): Promise<ExportAnswer> => {
+    // AGREED LIMIT (owner, 2026-11-28): one export or panel run at a time for the app, said ("A run of <tool> is already running …") — why: item 26 rule 6, "Necessary limits - agreed" — necessary because each run holds a copy of the project in a child process.
     if (current) return busy(current);
     const mine: Current = current = { tool, id, child: null, dir: null, cancelled: false, ended: false, exporting: false, keepWork: !!keepWork };
     const stopped = () => refused('cancelled', `The ${tool} run was cancelled; nothing was changed.`);

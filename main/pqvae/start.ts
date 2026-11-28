@@ -22,6 +22,7 @@ export function startPqvae(o: { entry: string; models: string; routerUrl: string
   const stop = () => { try { child.stdin?.end(); } catch { /* gone */ } setTimeout(() => { if (child.exitCode == null) try { child.kill(); } catch { /* gone */ } }, 3000).unref(); };
   return new Promise((res, rej) => {
     let out = '';
+    // AGREED LIMIT (owner, 2026-11-28): 30 s — the PQ-VAE engine must be up by then — why: item 26 rule 5, "Timers, memory, and safety - agreed" — arbitrary by agreement.
     const t = setTimeout(() => { stop(); rej(new Error('the PQ-VAE engine did not start within 30 s')); }, 30_000);
     child.on('exit', (code) => { clearTimeout(t); log.end(); rej(new Error(`the PQ-VAE engine stopped (exit ${code}); see ${o.log}`)); });
     child.stdout?.on('data', (d: Buffer) => {

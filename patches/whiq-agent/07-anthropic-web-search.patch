@@ -17,7 +17,7 @@ index 5e845e5..3e72f37 100644
 +  const seen = new Set();
 +  const cited = new Map();
 +  let answer = '';
-+  for (let turn = 0; turn < 4; turn++) {                                        // pause_turn: the server loop asks to be resumed
++  for (let turn = 0; turn < 4; turn++) {                                        // pause_turn: the server loop asks to be resumed. AGREED LIMIT (owner, 2026-11-28): 4 turns, 2,048 tokens, 3 searches a turn, 500-character snippets — Anthropic web search on the desktop — why: item 26 rule 5, "Timers, memory, and safety - agreed" — arbitrary by agreement.
 +    const body = { model, max_tokens: 2048, messages, tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 3 }] };
 +    const { headers } = applyAnthropicRequestFields(body, {}, {}, provider);
 +    const r = await llmFetch(`${base}/v1/messages`, { method: 'POST', headers, body: JSON.stringify(body), signal: AbortSignal.timeout(WEBSEARCH_TIMEOUT_MS) });

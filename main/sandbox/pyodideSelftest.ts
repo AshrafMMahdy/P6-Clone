@@ -152,6 +152,7 @@ export async function runSelftest(ctx: { shared: Shared; port: number; log: (l: 
   if (process.env.P6_SANDBOX_DEBUG) ctx.log('trap up on ' + trapPort);
   const a = new SandboxSession('selftest-a', shared);
   const b = new SandboxSession('selftest-b', shared, true);
+  // AGREED LIMIT (owner, 2026-11-28): 60 s a probe, 120 s the packages probe — the self-test that gates the sandbox; a failure is said with the failed checks — why: item 26 rule 6, "Necessary limits - agreed" — necessary because an unproven jail must not run code; the times arbitrary by agreement.
   const py = async (s: SandboxSession, code: string, ms = 60_000) => s.run(code, ms);
   const json = (stdout: string): any => { try { return JSON.parse(stdout.trim().split('\n').pop() ?? ''); } catch { return null; } };   // eslint-disable-line @typescript-eslint/no-explicit-any
   try {

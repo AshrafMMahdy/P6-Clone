@@ -267,7 +267,8 @@ export function listReports(db: Db): ReportEntry[] {
   const fixed: ReportEntry[] = REPORTS.map((r) => ({ id: r.id, name: r.title, group: FIXED_GROUP[r.id] ?? r.group, kind: 'standard' }));
   const usage: ReportEntry = { id: 'usageMonth', name: 'Resource Usage by Month', group: 'Resources', kind: 'standard', description: 'Actual and remaining units of each resource per month.' };
   const std = Object.entries(STD_SPECS).map(([id, s]): ReportEntry => ({ id, name: s.name, group: s.group, kind: 'standard', description: s.description, spec: s }));
-  const custom = rows(db, '_REPORT').map((r): ReportEntry | null => { const s = parseSpec(r.json); return s ? { id: `custom:${r.report_id}`, name: s.name, group: s.group || 'My Reports', kind: 'custom', description: s.description, spec: s } : null; }).filter((x): x is ReportEntry => !!x);
+  // a saved report that cannot be read stays in the list, named as such: running it says why (item 26: it dropped out of the list silently)
+  const custom = rows(db, '_REPORT').map((r): ReportEntry => { const s = parseSpec(r.json); return s ? { id: `custom:${r.report_id}`, name: s.name, group: s.group || 'My Reports', kind: 'custom', description: s.description, spec: s } : { id: `custom:${r.report_id}`, name: `Report ${r.report_id} (cannot be read)`, group: 'My Reports', kind: 'custom', description: 'Its saved definition cannot be read: delete it, or make it again with the Report Wizard.' }; });
   const order = (e: ReportEntry) => REPORT_GROUPS.indexOf(e.group) < 0 ? 99 : REPORT_GROUPS.indexOf(e.group);
   return [...fixed, usage, ...std, ...custom].sort((a, b) => order(a) - order(b));
 }
@@ -291,8 +292,10 @@ export function parseSpec(json: string | unknown): ReportSpec | null {
 export function runReport(db: Db, projIds: string[], idOrName: string, o: RunOptions): { entry: ReportEntry; report: Report } {
   const all = listReports(db);
   const key = String(idOrName).toLowerCase();
-  const entry = all.find((e) => e.id.toLowerCase() === key) ?? all.find((e) => e.name.toLowerCase() === key) ?? all.find((e) => e.name.toLowerCase().includes(key));
-  if (!entry) throw new Error(`No report "${idOrName}". Reports: ${all.map((e) => e.name).join(', ')}`);
+  // the id or the exact name (any case): a name that is not exact is refused, naming the reports that contain it (item 26: the first such report was opened)
+  const entry = all.find((e) => e.id.toLowerCase() === key) ?? all.find((e) => e.name.toLowerCase() === key);
+  if (!entry) { const near = all.filter((e) => key && e.name.toLowerCase().includes(key)); throw new Error(near.length ? `No report is named "${idOrName}" exactly; reports whose name contains it: ${near.map((e) => `"${e.name}"`).join(', ')}.` : `No report "${idOrName}". Reports: ${all.map((e) => e.name).join(', ')}`); }
+  if (entry.kind === 'custom' && !entry.spec) throw new Error(`${entry.name}: ${entry.description}`);
   if (entry.spec) return { entry, report: runSpec(db, projIds, entry.spec, o) };
   if (entry.id === 'usageMonth') return { entry, report: usageReport(db, projIds, o) };
   const def = REPORTS.find((r) => r.id === entry.id)!;
@@ -306,12 +309,12 @@ function usageReport(db: Db, projIds: string[], o: RunOptions): Report {
   if (!Number.isFinite(lo) || hi <= lo) return { title: 'Resource Usage by Month', columns: ['Resource'], rows: [] };
   const u = spreadUsage(db, projIds, { start: lo, end: hi, bucket: 'month' });
   const rsrc = new Map(rows(db, 'RSRC').map((r) => [r.rsrc_id, r]));
-  const months = u.buckets.slice(0, 60).map((b) => { const d = new Date(b * 60000); return `${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getUTCMonth()]}-${String(d.getUTCFullYear()).slice(2)}`; });
+  const months = u.buckets.map((b) => { const d = new Date(b * 60000); return `${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getUTCMonth()]}-${String(d.getUTCFullYear()).slice(2)}`; });
   const out: Report['rows'] = [];
   for (const r of u.rows) {
     const tot = r.actual.map((a, i) => a + r.remaining[i]);
     if (!tot.some((v) => v > 0.001)) continue;
-    out.push({ cells: [rsrc.get(r.rsrcId)?.rsrc_short_name ?? r.rsrcId, num2(tot.reduce((s, v) => s + v, 0)), ...tot.slice(0, 60).map((v) => (v ? num2(v) : ''))] });
+    out.push({ cells: [rsrc.get(r.rsrcId)?.rsrc_short_name ?? r.rsrcId, num2(tot.reduce((s, v) => s + v, 0)), ...tot.map((v) => (v ? num2(v) : ''))] });
   }
   return { title: 'Resource Usage by Month', subtitle: `Units (hours) per month, actual + remaining · ${o.prefs.hoursPerDay} h/day`, columns: ['Resource', 'Total', ...months], rows: out };
 }

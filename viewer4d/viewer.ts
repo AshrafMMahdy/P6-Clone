@@ -45,6 +45,7 @@ const opt: Required<Pick<Options, 'layout' | 'left' | 'step' | 'growth' | 'overl
 const DAY = 1440;
 const toMin = (s: string | null | undefined) => (s ? Date.parse(`${s.slice(0, 10)}T${s.slice(11, 16) || '00:00'}:00Z`) / 60000 : null);
 const iso = (m: number) => new Date(m * 60000).toISOString().slice(0, 10);
+// AGREED LIMIT (owner, 2026-11-28): 30 days — a timeline with no finish (no dated activity) plays 30 days from its start — why: item 26 rule 4, "Defaults - agreed" — arbitrary by agreement.
 let t0 = toMin(tl.start) ?? 0, t1 = toMin(tl.finish) ?? t0 + 30 * DAY;
 let dataDate = toMin(tl.dataDate);
 let actById = new Map(tl.activities.map((a) => [a.task, a]));
@@ -499,6 +500,7 @@ function drawOverlays(g: CanvasRenderingContext2D, W: number, H: number, clear =
     bottom = y - 6 * k;
   }
   if (opt.overlays.includes('activity_list')) {
+    // AGREED LIMIT (owner, 2026-11-28): 10 activities — the "Under way" overlay of a frame lists the first 10 (the frame has room for no more) — why: item 26 rule 4, "Defaults - agreed" — arbitrary by agreement (frame space).
     const rows = activeRows().slice(0, 10);
     g.font = `${12 * k}px Segoe UI, sans-serif`;
     const w = Math.min(W * 0.5, 560 * k), h = (rows.length + 1) * 18 * k + 12 * k, y = bottom - h;
@@ -671,7 +673,8 @@ window.WHIQ4D_EXPORT = {
   status: api.status,
   ready: api.ready,
   max: () => Math.max(1, Math.round((t1 - t0) / DAY)),
-  setStep: (days: number) => { opt.step = Math.max(1, Number(days) || 7); },
+  // a step under a day (0, blank, text) is refused, not turned into a week (item 26, rule 1)
+  setStep: (days: number) => { const n = Number(days); if (!Number.isFinite(n) || n < 1) throw new Error(`A step is at least 1 day (got ${JSON.stringify(days)}).`); opt.step = n; },
   frame: (v: number) => { failedNow(); if (!loaded) throw new Error('The 4D model has not finished loading (WHIQ4D_EXPORT.ready() is still false).'); current = Math.min(t1, t0 + Number(v) * DAY); render(); return composite().toDataURL('image/png'); },
 };
 

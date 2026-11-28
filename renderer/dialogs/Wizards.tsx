@@ -9,6 +9,7 @@ import { rows } from '../../core/db.ts';
 import { ensureEps, projectName } from '../model.ts';
 import { ENCODINGS, encodingLabel, type TextEncodingName } from '../../core/encoding.ts';
 import { openProjects } from '../views/ProjectsView.tsx';
+import { NEW_XER_VERSION } from '../../core/xer/write.ts';
 
 function WizardFrame(p: { title: string; steps: string[]; step: number; children: React.ReactNode; onBack?: () => void; onNext?: () => void; onFinish?: () => void; nextDisabled?: boolean; finishLabel?: string }) {
   return (
@@ -257,7 +258,8 @@ export function ExportWizard(props: { projIds?: string[] }) {
   const projects = rows(db, 'PROJECT').filter((p) => !p._baseline_of);
   const [step, setStep] = useState(0);
   const [format, setFormat] = useState<Format>('xer');
-  const [version, setVersion] = useState('19.12');
+  // the version the MCP save writes when none is asked (item 26): the one the file was read with, else NEW_XER_VERSION; the user sees and can change it
+  const [version, setVersion] = useState(() => { const v = getDb().header?.version; return v && EXPORT_VERSIONS.includes(v) ? v : NEW_XER_VERSION; });
   const [encoding, setEncoding] = useState<TextEncodingName | 'auto'>('auto');
   const [sel, setSel] = useState<string[]>(props.projIds ?? (ui.openProjects.length ? ui.openProjects : projects.slice(0, 1).map((p) => p.proj_id)));
   const [busy, setBusy] = useState<string | null>(null);

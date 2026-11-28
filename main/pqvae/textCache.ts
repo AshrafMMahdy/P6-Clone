@@ -24,6 +24,7 @@ export class TextCache {
   hits = 0;
   misses = 0;
 
+  // AGREED LIMIT (owner, 2026-11-28): 512 MB — over it the model's text cache is emptied at start — why: item 26 rule 5, "Timers, memory, and safety - agreed" — arbitrary by agreement.
   constructor(root: string, modelId: string, limitMb = Number(process.env.PQVAE_TEXT_CACHE_MB) || 512) {
     this.dir = join(root, sha(modelId).toString('hex').slice(0, 16));
     mkdirSync(this.dir, { recursive: true });

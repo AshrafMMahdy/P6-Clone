@@ -25,6 +25,7 @@ import { SnapshotStore, restoreSession, saveSession, type EndReason } from './py
 export { registerSandboxScheme, SANDBOX_SCHEME_ENTRY };
 export type { Selftest };
 
+// AGREED LIMIT (owner, 2026-11-28): 256 MB — one request to the sandbox; over it is refused ("send big files in parts") — why: item 26 rule 6, "Necessary limits - agreed" — necessary because a server bounds what it reads; 256 MB arbitrary by agreement.
 const MAX_BODY = 256 * 1048576;   // one request; the platform sends big files in parts of a few MB
 const DEFAULT_PACKAGES = ['numpy', 'pandas', 'scipy', 'matplotlib', 'openpyxl', 'xlsxwriter', 'python-docx', 'python-pptx', 'pypdf', 'lxml', 'pillow'];
 
@@ -66,6 +67,7 @@ const NO_SHELL = (language: string): RunResult => ({
 
 export async function startPyodideSandbox(o: { dir: string; pageDir?: string; port?: number; snapshotDir?: string; log?: (line: string) => void }): Promise<{ url: string; close(): Promise<void>; selftest: Selftest }> {
   const log = o.log ?? (() => {});
+  // AGREED LIMIT (owner, 2026-11-28): 512 MB a file, 2 GB a session folder, 1 h idle — the sandbox's file, disk and idle limits, said when hit — why: item 26 rule 5, "Timers, memory, and safety - agreed" — the platform sandbox's own numbers (service.py).
   const limits: Limits = { fileMb: envNumber('VM_SANDBOX_FILE_MB', 512), diskMb: envNumber('VM_SANDBOX_DISK_MB', 2048), idleS: envNumber('VM_SANDBOX_IDLE_S', 3600), memMb: 4096 /* the WebAssembly memory ceiling */ };
   if (!existsSync(join(o.dir, 'pyodide.asm.wasm'))) throw new Error(`Pyodide is not installed in ${o.dir} (node scripts/fetch-pyodide.mjs)`);
   const pageDir = o.pageDir ?? findPageDir();
@@ -73,9 +75,12 @@ export async function startPyodideSandbox(o: { dir: string; pageDir?: string; po
   for (const f of ['index.html', 'page.js', 'worker.js']) files.set('/' + f, join(pageDir, f));
   for (const f of readdirSync(o.dir)) if (statSync(join(o.dir, f)).isFile()) files.set('/pyodide/' + f, join(o.dir, f));
   let packages = DEFAULT_PACKAGES;
-  try { const m = JSON.parse(readFileSync(join(o.dir, 'manifest.json'), 'utf8')) as { load?: string[] }; if (m.load?.length) packages = m.load; } catch { /* the default list */ }
+  // the manifest fetch-pyodide wrote names the packages; one that is missing or unreadable is said in the log, and the default list is loaded (item 26, desktop C21)
+  try { const m = JSON.parse(readFileSync(join(o.dir, 'manifest.json'), 'utf8')) as { load?: string[] }; if (m.load?.length) packages = m.load; else log(`[pyodide] ${join(o.dir, 'manifest.json')} names no packages: the default list is loaded (${DEFAULT_PACKAGES.join(', ')}).`); }
+  catch (e) { log(`[pyodide] ${join(o.dir, 'manifest.json')} cannot be read (${(e as Error).message}): the default package list is loaded (${DEFAULT_PACKAGES.join(', ')}).`); }
   const shared: Shared = {
     files, preload: join(pageDir, 'preload.cjs'), packages, limits, log,
+    // AGREED LIMIT (owner, 2026-11-28): 5 s — a run past its time limit that does not stop is killed, said — why: item 26 rule 5, "Timers, memory, and safety - agreed" — arbitrary by agreement.
     graceMs: envNumber('P6_SANDBOX_GRACE_MS', 5000),
     noCsp: process.env.P6_SANDBOX_TEST_NO_CSP === '1',   // tests only: proves the request cancel holds without the page policy
   };
@@ -84,8 +89,10 @@ export async function startPyodideSandbox(o: { dir: string; pageDir?: string; po
   let selftest: Selftest = { ok: false, checks: [{ name: 'self-test', ok: false, detail: 'not run yet' }] };
   let closed = false;
 
+  // AGREED LIMIT (owner, 2026-11-28): 2 sessions — a third chat ends the least recently used idle one (saved first), said — why: item 26 rule 5, "Timers, memory, and safety - agreed" — necessary because each session is a Chromium page of about half a GB; 2 arbitrary by agreement.
   const maxSessions = Math.max(1, Math.floor(envNumber('VM_SANDBOX_MAX_SESSIONS', 2)));
   const store = new SnapshotStore(o.snapshotDir ?? join(app.getPath('userData'), 'whiq', 'sandbox-snapshots'), {
+    // AGREED LIMIT (owner, 2026-11-28): 2 GB, 24 h, 120 s — the saved states of ended sessions: size, age and the time of one archive step — why: item 26 rule 5, "Timers, memory, and safety - agreed" — arbitrary by agreement.
     maxBytes: envNumber('P6_SANDBOX_SNAPSHOT_MB', 2048) * 1048576, keepMs: envNumber('P6_SANDBOX_SNAPSHOT_KEEP_S', 86400) * 1000, log,
   });
   const snapshotMs = envNumber('P6_SANDBOX_SNAPSHOT_S', 120) * 1000;
@@ -176,8 +183,10 @@ export async function startPyodideSandbox(o: { dir: string; pageDir?: string; po
         const code = String(body.code ?? '');
         const language = String(body.language ?? 'python');
         const ms = Number(body.timeoutMs ?? 0) || 0;   // 0 / absent: no limit; the cell runs until it ends or /interrupt stops it
+        // a limit under 1 s is refused, not raised to 1 s (item 26, rule 1)
+        if (ms > 0 && ms < 1000) return sendJson(res, 400, { error: `timeoutMs ${ms} is under 1,000 (1 s): give 1,000 or more, or 0 for no limit.` });
         if (language !== 'python') return sendJson(res, 200, NO_SHELL(language));
-        return sendJson(res, 200, await s.run(code, ms > 0 ? Math.max(1000, ms) : 0));
+        return sendJson(res, 200, await s.run(code, ms > 0 ? ms : 0));
       }
       return sendJson(res, 404, { error: 'not found' });
     } catch (e) {

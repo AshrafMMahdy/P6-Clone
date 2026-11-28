@@ -114,7 +114,7 @@ export function ScheduleOptionsDialog() {
               {rows(db, 'TASK').filter((t) => ui.openProjects.includes(t.proj_id) && t.task_type !== 'TT_WBS').map((t) => <option key={t.task_id} value={t.task_code}>{t.task_code} {t.task_name}</option>)}
             </select>
             <label>Number of paths to calculate</label>
-            <input type="number" min={1} disabled={!o.floatPaths.enabled} style={{ width: 70 }} value={o.floatPaths.count} onChange={(e) => set({ floatPaths: { ...o.floatPaths, count: Math.max(1, Math.floor(Number(e.target.value) || 1)) } })} />
+            <input type="number" min={1} disabled={!o.floatPaths.enabled} style={{ width: 70 }} value={o.floatPaths.count} onChange={(e) => { const n = Number(e.target.value); if (Number.isInteger(n) && n >= 1) set({ floatPaths: { ...o.floatPaths, count: n } }); else toast('The number of paths must be a whole number of 1 or more.'); }} />
           </div>
         </div>
       </fieldset>

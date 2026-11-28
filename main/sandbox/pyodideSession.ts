@@ -11,6 +11,7 @@ import { posix } from 'node:path';
 export const SCHEME = 'p6pyo';
 export const ORIGIN = `${SCHEME}://app/`;
 export const HOME = '/home/user';
+// AGREED LIMIT (owner, 2026-11-28): 2,000,000 characters — stdout and stderr each, per run, cut and said — why: item 26 rule 5, "Timers, memory, and safety - agreed" — the platform sandbox's own number (worker.py).
 export const MAX_OUT = 2_000_000;   // characters of stdout / stderr handed back per run (09 Local Sandbox/worker.py)
 
 export interface RunResult { stdout: string; stderr: string; error: string | null; traceback: string; exitCode: number }
@@ -214,9 +215,11 @@ export class SandboxSession {
     const t0 = Date.now();
     if (!this.win || this.win.isDestroyed()) await this.openWindow();
     const info = await new Promise<WorkerInfo>((resolve, reject) => {
+      // AGREED LIMIT (owner, 2026-11-28): 3 minutes — a Python worker not up by then fails, said — why: item 26 rule 5, "Timers, memory, and safety - agreed" — arbitrary by agreement.
       const t = setTimeout(() => { this.workerWait = null; reject(new Error('the Python worker did not start within 3 minutes')); }, 180_000);
       this.workerWait = { resolve: (v) => { clearTimeout(t); resolve(v); }, reject: (e) => { clearTimeout(t); reject(e); } };
       const { limits } = this.shared;
+      // AGREED LIMIT (owner, 2026-11-28): 1-32 MB — how often the folder size is measured (the 2 GB limit can be passed by up to 32 MB) — why: item 26 rule 5, "Timers, memory, and safety - agreed" — arbitrary by agreement (performance).
       this.sendUp({ type: 'start', init: { packages: this.light ? [] : this.shared.packages, limits: { fileBytes: limits.fileMb * 1048576, diskBytes: limits.diskMb * 1048576, scanBytes: Math.max(1048576, Math.min(32 * 1048576, (limits.diskMb * 1048576) >> 3)), maxOut: MAX_OUT } } });
     });
     info.totalMs = Date.now() - t0;

@@ -40,6 +40,7 @@ export function answerOf(lines: string[], code: number | null, stderr: string): 
   if (last !== undefined) {
     try { const a = JSON.parse(last); if (a && typeof a === 'object' && 'isError' in a && 'out' in a) return a as ExportAnswer; } catch { /* not an answer: said below */ }
   }
+  // AGREED LIMIT (owner, 2026-11-28): 600 characters — the last of a child's output shown when it ended without an answer — why: item 26 rule 5, "Timers, memory, and safety - agreed" — arbitrary by agreement.
   const stray = lines.join('\n').slice(-600);
   return refused('export_failed', `The export program stopped (exit ${code}) without an answer.${stderr ? ` ${stderr.slice(-600)}` : ''}${stray ? ` Its other output: ${stray}` : ''}`);
 }

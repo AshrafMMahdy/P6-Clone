@@ -25,6 +25,7 @@ function run(cmd: string, args: string[], timeout: number, encoding: BufferEncod
   });
 }
 /** One bash command in the default WSL distribution. */
+// AGREED LIMIT (owner, 2026-11-28): 60 s a WSL command, 15 s the distribution list, 3 s before a stopped one is killed, the last 30 lines / 300 characters of an error — a cold WSL past these falls back to Pyodide, the reason in sandbox.log and Settings — why: item 26 rule 5, "Timers, memory, and safety - agreed" — arbitrary by agreement.
 const bash = (cmd: string, timeout = 60_000) => run('wsl.exe', ['-e', 'bash', '-lc', cmd], timeout);
 
 /** The folder the service lives in inside WSL. */
@@ -60,6 +61,7 @@ export async function startWslSandbox(source: string, log: (line: string) => voi
   child.on('exit', () => { exited = true; });
   const url = `http://127.0.0.1:${port}`;
   const close = () => { try { child.stdin?.end(); } catch { /* gone */ } setTimeout(() => { if (!exited) try { child.kill(); } catch { /* gone */ } }, 3000).unref(); };
+  // AGREED LIMIT (owner, 2026-11-28): 120 health probes (2 s + 0.5 s each, about 5 minutes) — the WSL sandbox must be up by then — why: item 26 rule 5, "Timers, memory, and safety - agreed" — arbitrary by agreement.
   for (let i = 0; i < 120 && !exited; i++) {   // the self-test takes a few seconds; a cold WSL start a few more
     try {
       const h = await (await fetch(`${url}/health`, { signal: AbortSignal.timeout(2000) })).json() as { ok?: boolean; jail?: boolean };

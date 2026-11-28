@@ -41,7 +41,7 @@ export async function printView(mode: 'print' | 'pdf' | 'preview'): Promise<void
   const ps = pageSetup();
   const band = (b: PageSetup['header']) => !b.show ? '' : [b.left, b.center, b.right].filter(Boolean).join('   |   ')
     .replace(/\[Project ID\]/g, p?.proj_short_name ?? '').replace(/\[Project Name\]/g, p ? projectName(getDb(), p) : '').replace(/\[Data Date\]/g, p?.last_recalc_date?.slice(0, 10) ?? '')
-    .replace(/\[Print Date\]/g, formatP6Date(Date.now() / 60000 - new Date().getTimezoneOffset()).slice(0, 16)).replace(/\[Page\] of \[Pages\]|\[Page\]|\[Pages\]/g, '').replace(/\[[A-Za-z ]+\]/g, '');
+    .replace(/\[Print Date\]/g, formatP6Date(Date.now() / 60000 - new Date().getTimezoneOffset()).slice(0, 16)).replace(/\[Page\] of \[Pages\]|\[Page\]|\[Pages\]/g, ''); // a token this window does not fill stays as written, so it can be seen and corrected (item 26: it was removed)
   const mk = (cls: string, text: string) => { const d = document.createElement('div'); d.className = cls; d.style.cssText = 'display:none'; d.textContent = text; return d; };
   const head = mk('print-band', band(ps.header)), foot = mk('print-band', band(ps.footer));
   const style = document.createElement('style');

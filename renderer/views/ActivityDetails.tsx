@@ -3,6 +3,7 @@ import { useMemo, useState, type ReactNode } from 'react';
 import { Tabs } from '../components/Layout.tsx';
 import { getDb, mutate, openDialog, setUi, toast, useStore } from '../store.ts';
 import { useCtx } from '../hooks.ts';
+import { dayOf } from '../model.ts';
 import { CSTR_TYPES, DUR_TYPES, PCT_TYPES, REL_TYPES, RSRC_TYPES, TASK_TYPES, activityPct, actualDurHours, atCompletionDurHours, daysToHours, fmtDate, fmtDur, isCritical, isMilestone, memoHtml, memoText, setActual, setPercent, statusOf, STATUS, wbsPath, type Ctx } from '../model.ts';
 import { addField, nextId, rows, table, type Row } from '../../core/db.ts';
 import { formatP6Date, parseP6Date } from '../../core/dates.ts';
@@ -270,7 +271,7 @@ function Resources({ t, ctx }: { t: Row; ctx: Ctx }) {
                 <tr key={a.taskrsrc_id} className={sel === a.taskrsrc_id ? 'sel' : ''} onMouseDown={() => setSel(a.taskrsrc_id)}>
                   <td>{r?.rsrc_short_name ?? (a.rsrc_id ? a.rsrc_id : <i>(role)</i>)}</td><td>{r?.rsrc_name ?? role(a.role_id)?.role_name}</td><td>{RSRC_TYPES[a.rsrc_type || r?.rsrc_type || ''] ?? ''}</td>
                   <td>{num('target_qty')}</td><td>{num('act_reg_qty')}</td><td>{num('remain_qty')}</td>
-                  <td>{p6num(Number(a.target_qty_per_hr || 0) * 8)}/d</td><td>{p6num(priceOf(getDb(), a))}</td>
+                  <td>{p6num(Number(a.target_qty_per_hr || 0) * dayOf(t, ctx))}/d</td><td>{p6num(priceOf(getDb(), a))}</td>
                   <td><select value={a.curv_id || ''} onChange={(e) => mutate('Change Resource Curve', (db) => { const x = db.tables.TASKRSRC.rows.find((y) => y.taskrsrc_id === a.taskrsrc_id)!; addField(db.tables.TASKRSRC, 'curv_id'); x.curv_id = e.target.value; })}>
                     <option value=''>Linear (default)</option>{rows(ctx.db, 'RSRCCURVDATA').map((c) => <option key={c.curv_id} value={c.curv_id}>{c.curv_name}</option>)}</select></td>
                   <td>{p6num(Number(a.target_cost || 0))}</td><td>{p6num(Number(a.act_reg_cost || 0) + Number(a.act_ot_cost || 0))}</td><td>{p6num(Number(a.remain_cost || 0))}</td>

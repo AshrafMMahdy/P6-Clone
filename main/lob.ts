@@ -19,12 +19,20 @@ export function registerLob(getWin: () => BrowserWindow | null): void {
       if (/\.dpp$/i.test(p)) {
         const v = readVicoDpp(new Uint8Array(readFileSync(p)));
         const x = lobFromVico(v, '');
-        const start = v.start ?? x.model.tasks.flatMap((t) => t.segments.map((g) => g.start ?? '')).filter(Boolean).sort()[0] ?? new Date().toISOString().slice(0, 10);
+        // the start the plan gives, else its first segment's, else today: each said in the import's notes (item 26, desktop C34)
+        const first = x.model.tasks.flatMap((t) => t.segments.map((g) => g.start ?? '')).filter(Boolean).sort()[0];
+        const start = v.start ?? first ?? new Date().toISOString().slice(0, 10);
+        const said = v.start ? [] : [first ? `The plan has no start date of its own: it starts at its first segment's start, ${start}.` : `The plan has no start date and no dated segment: it starts today, ${start}.`];
         const y = Number(start.slice(0, 4));
-        return { name: v.name || basename(p), model: x.model, start, hoursPerDay: x.hoursPerDay, ...(x.calendar ? { calendarOp: vicoCalendarOp(x.calendar, `${(v.name || 'Vico').slice(0, 30)} (Vico)`, [y - 1, y + 5]) } : {}), notes: x.notes };
+        // AGREED LIMIT (owner, 2026-11-28): the year before the start to 5 years after — the years a Vico calendar's holidays are written for, said in the notes — why: item 26 rule 4, "Defaults - agreed" — arbitrary by agreement (a plan running later has no holidays after them).
+        const years: [number, number] = [y - 1, y + 5];
+        if (x.calendar) said.push(`The Vico calendar's holidays are written for ${years[0]} to ${years[1]}: a plan running past ${years[1]} has no holidays after it.`);
+        return { name: v.name || basename(p), model: x.model, start, hoursPerDay: x.hoursPerDay, ...(x.calendar ? { calendarOp: vicoCalendarOp(x.calendar, `${(v.name || 'Vico').slice(0, 30)} (Vico)`, years) } : {}), notes: [...x.notes, ...said] };
       }
       const t = readTactplan(dirname(p));
-      return { name: basename(dirname(p)), model: t.model, start: t.start ?? new Date().toISOString().slice(0, 10), hoursPerDay: 8, notes: t.notes };
+      // a Tactplan grid gives no hours a day (8, P6's default) and may give no start (today): both said in the import's notes (item 26, desktop C34, C35)
+      const start = t.start ?? new Date().toISOString().slice(0, 10);
+      return { name: basename(dirname(p)), model: t.model, start, hoursPerDay: 8, notes: [...t.notes, 'A Tactplan grid gives no hours a day: 8 hours a day are used (P6\'s default).', ...(t.start ? [] : [`The grid has no start date: the plan starts today, ${start}.`])] };
     } catch (e) { return { error: (e as Error).message }; }
   });
 }

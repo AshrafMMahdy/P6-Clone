@@ -20,7 +20,7 @@ export const card = { background: '#f3f4f6', border: '1px solid #d9dce1', border
 export function MonteCarloPanel() {
   const ui = useStore((s) => s.ui);
   const dbVersion = useStore((s) => s.dbVersion);
-  const [iterations, setIterations] = useState(500);
+  const [iterations, setIterations] = useState(2000); // the MCP's agreed default (mcp/workset.ts), so the screen and the agent run the same (item 26)
   const [seed, setSeed] = useState('');
   const [events, setEvents] = useState<RiskPhase | 'off'>('pre');
   const [res, setRes] = useState<MonteCarloResult | null>(null);

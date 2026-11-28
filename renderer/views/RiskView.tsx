@@ -276,7 +276,7 @@ function RiskActivities({ risk }: { risk: Row }) {
     const q = find.trim().toLowerCase();
     return rows(db, 'TASK').filter((t) => t.proj_id === risk.proj_id && t.task_type !== 'TT_WBS' && !linkedSet.has(t.task_id)
       && (!q || (t.task_code ?? '').toLowerCase().includes(q) || (t.task_name ?? '').toLowerCase().includes(q)))
-      .sort((a, b) => byCode(a.task_code, b.task_code)).slice(0, 500);
+      .sort((a, b) => byCode(a.task_code, b.task_code)); // every match: the count is the total (item 26: it showed 500 as if all)
   }, [ctx, db, risk, find, linked]);
   const link = (ids: string[]) => {
     const ok = ids.filter((id) => ctx.taskById.get(id)?.proj_id === risk.proj_id && !linkedSet.has(id));
@@ -487,7 +487,7 @@ function setRun(patch: Partial<RunState>) { runState = { ...runState, ...patch }
 function useRun(): RunState {
   return useSyncExternalStore((cb) => { runListeners.add(cb); return () => runListeners.delete(cb); }, () => runState);
 }
-let lastSettings = { iterations: 500, seed: '', events: 'pre' as RiskPhase | 'off' };
+let lastSettings = { iterations: 2000, seed: '', events: 'pre' as RiskPhase | 'off' }; // the MCP's agreed default (mcp/workset.ts) (item 26)
 
 /** The analysis is the monte_carlo tool itself, run in the Export's child process on the saved database (main/analysis-export-ipc.ts,
  *  renderer/views/toolRun.ts): the window is never held, the tool refuses a run that does not fit in memory in words before it starts (shown
@@ -639,6 +639,7 @@ export function Results({ res, prefs }: { res: MonteCarloResult; prefs: Prefs })
 }
 
 function Tornado({ res }: { res: MonteCarloResult }) {
+  // AGREED LIMIT (owner, 2026-11-28): 10 activities — the duration sensitivity chart shows the ten most sensitive (its heading says top 10; Export lists all) — why: item 26 rule 3, "Lists inside Answers, Agreed" — arbitrary by agreement (a chart).
   const top = res.sensitivity.slice(0, 10);
   return (
     <div className="details" style={{ background: '#fff', overflow: 'auto' }}>

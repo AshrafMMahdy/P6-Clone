@@ -21,7 +21,7 @@ import { CHANGED_SINCE, lintArgs, lintStopped, refusal, staleReason, type RunSta
 import { stampNow, useChangedSince, useToolRun } from './toolRun.ts';
 import { RunStatus } from './RunStatus.tsx';
 import { CheckSchedulePanel, ComparePanel, EvaluatePanel, FloatPathsPanel, LevelPanel, ProgressCurvesPanel, ResourceHistogramPanel, ReviewPanel } from './AnalysisPanels.tsx';
-import { ExportButton, projectArgs } from './ExportButton.tsx';
+import { ExportButton, numberOf, projectArgs } from './ExportButton.tsx';
 
 export const EXTENSIONS: { id: string; title: string; blurb: string }[] = [
   { id: 'dcma', title: 'DCMA 14-point', blurb: 'The 14 DCMA schedule checks, with the critical path test, CPLI and BEI.' },
@@ -71,12 +71,16 @@ function DcmaPanel() {
   const [status, setStatus] = useState('');
   const [target, setTarget] = useState('');
   const [slip, setSlip] = useState('600');
+  // the test delay: a number of working days above 0; a cleared box or text is refused in words (item 26: it became 600 silently)
+  const slipOf = () => { const n = numberOf('The test delay', slip, true)!; if (!(n > 0)) throw new Error('The test delay must be more than 0 days.'); return n; };
   const [dynamic, setDynamic] = useState(false);
   const [report, setReport] = useState<DcmaReport | null>(null);
   const run = () => {
     const sd = status ? parseP6Date(status.replace('T', ' ')) : null, tf = target ? parseP6Date(target.replace('T', ' ')) : null;
     if ((status && sd == null) || (target && tf == null)) return toast('Enter valid dates.');
-    setReport(dcma14(getDb(), { projIds: ui.openProjects, hoursPerDay: ui.prefs.hoursPerDay, profile, baseline, statusDate: sd, targetFinish: tf, cptSlipDays: Number(slip) || 600, limitDays: dynamic ? 'dynamic' : 44 }));
+    let slipDays: number;
+    try { slipDays = slipOf(); } catch (e) { return toast((e as Error).message); }
+    setReport(dcma14(getDb(), { projIds: ui.openProjects, hoursPerDay: ui.prefs.hoursPerDay, profile, baseline, statusDate: sd, targetFinish: tf, cptSlipDays: slipDays, limitDays: dynamic ? 'dynamic' : 44 }));
   };
   const save = async () => {
     if (!report) return;
@@ -96,7 +100,7 @@ function DcmaPanel() {
         {report && <button className="btn" onClick={save}>Save Report...</button>}
         <ExportButton tool="dcma_14" args={() => {
           if ((status && parseP6Date(status.replace('T', ' ')) == null) || (target && parseP6Date(target.replace('T', ' ')) == null)) throw new Error('Enter valid dates.');
-          return { ...projectArgs(), profile, ...(baseline !== 'project' ? { baseline } : {}), ...(status ? { status_date: status.replace('T', ' ') } : {}), ...(target ? { target_finish: target.replace('T', ' ') } : {}), cpt_slip_days: Number(slip) || 600, limit_days: dynamic ? 'dynamic' : 44 };
+          return { ...projectArgs(), profile, ...(baseline !== 'project' ? { baseline } : {}), ...(status ? { status_date: status.replace('T', ' ') } : {}), ...(target ? { target_finish: target.replace('T', ' ') } : {}), cpt_slip_days: slipOf(), limit_days: dynamic ? 'dynamic' : 44 };
         }} />
       </div>
       {report && <div><b>{report.summary.failed}</b> failed · {report.summary.passed} passed{report.summary.not_assessed ? ` · ${report.summary.not_assessed} not assessed` : ''} · {report.tasks} tasks, {report.relationships} relationships · status date {report.status_date?.slice(0, 16) ?? 'not set'}{report.baseline ? ` · baseline ${report.baseline.name}${/project baseline$/.test(report.baseline.how) ? '' : ` (${report.baseline.how})`}` : ' · no baseline'}</div>}

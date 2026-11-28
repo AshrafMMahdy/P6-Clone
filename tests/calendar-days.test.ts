@@ -52,7 +52,7 @@ test('MCP: 5 d on a 10-h calendar reads back as 5 d in every result that shows d
   assert.equal((await call('project_summary', { handle: h })).days_are, undefined);
   assert.match((toolsList() as any[]).find((t) => t.name === 'project_summary').description, /working days of each activity\u2019s own calendar/);
   // reports: built-in and defined
-  const sr = await call('run_report', { handle: h, report: 'Schedule Report' });
+  const sr = await call('run_report', { handle: h, report: 'Schedule Report (by WBS)' });
   assert.deepEqual(sr.rows.filter((x: any) => !x.group).map((x: any) => [x.cells[0], x.cells[2], x.cells[3], x.cells[7]]), [['A', '5', '5', '0'], ['D', '2', '2', '9'], ['C', '5', '5', '6'], ['B', '5', '5', '0']]);
   const ar = await call('run_report', { handle: h, definition: { subject: 'activities', columns: ['activity_id', 'orig_dur', 'rem_dur', 'total_float', 'free_float'] } });
   assert.deepEqual(ar.rows.filter((x: any) => !x.group).map((x: any) => x.cells), [['5', '5', '0', '0'], ['2', '2', '9', '9'], ['5', '5', '6', '6'], ['5', '5', '0', '0']]);
@@ -120,7 +120,7 @@ test('the desktop app (no calendarDays): days at the fixed hours per day, edits 
   assert.equal(col('orig_dur').get(t('A'), makeCtx(db, prefs())), '6.3');
   assert.equal((runTool('get_activity', { activity_id: 'A' }, db, makeCtx(db, prefs()), [], 8) as any).orig_days, 6.3);
   const ids = [rows(db, 'PROJECT')[0].proj_id];
-  assert.equal(runReport(db, ids, 'Schedule Report', { prefs: prefs() }).report.rows.find((r) => r.cells[0] === 'A')!.cells[2], '6.3');
+  assert.equal(runReport(db, ids, 'Schedule Report (by WBS)', { prefs: prefs() }).report.rows.find((r) => r.cells[0] === 'A')!.cells[2], '6.3');
   // the 8-h activity: read the same under both rules
   const cal = project(true);
   const c8 = (d: Db, on: boolean) => { const x = rows(d, 'TASK').find((r) => r.task_code === 'C')!; return [x.target_drtn_hr_cnt, (runTool('get_activity', { activity_id: 'C' }, d, makeCtx(d, prefs()), [], 8, on) as any).total_float_days, col('total_float').get(x, makeCtx(d, prefs(on)))]; };

@@ -19,8 +19,10 @@ import { ExportButton, errorText, numberOf, projectArgs } from './ExportButton.t
 import { card } from './MonteCarloPanel.tsx';
 import { betweenCount, CHANGED_SINCE, floatPathsArgs, floatPathText, refusal, wasCancelled, type FloatPath, type RunStamp } from './toolAnswers.ts';
 import { stampNow, useChangedSince, useToolRun } from './toolRun.ts';
+import { LISTED } from '../../core/notes.ts';
 
 const Id = ({ id }: { id: string }) => <a href="#" onClick={(e) => { e.preventDefault(); goToActivity(id); }}>{id}</a>;
+// AGREED LIMIT (owner, 2026-11-28): 30 IDs in a line, then "… +N" — why: item 26 rule 3, "Lists inside Answers, Agreed" — arbitrary by agreement (screen space; the count of the rest is shown).
 const Ids = ({ ids, max = 30 }: { ids: string[]; max?: number }) => <>{ids.slice(0, max).map((c, i) => <span key={c}>{i ? ', ' : ''}<Id id={c} /></span>)}{ids.length > max ? ` … +${ids.length - max}` : ''}</>;
 const box = { display: 'flex', flexDirection: 'column', gap: 6, height: '100%', minHeight: 0 } as const;
 const bar = { display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' } as const;
@@ -141,7 +143,7 @@ export function FloatPathsPanel() {
                 <tbody>{res.between.paths.map((p, i) => <tr key={i} style={{ verticalAlign: 'top' }}><td>{i + 1}</td><td style={{ textAlign: 'right' }}>{p.duration_days}</td><td style={{ textAlign: 'right' }}>{p.min_float_days ?? '-'}</td><td style={{ whiteSpace: 'normal' }}><Ids ids={p.activities} /></td></tr>)}</tbody></table>}
           </div>}
           <div style={{ marginTop: 8 }}><b>Near critical</b> ({res.near_critical.length})</div>
-          <table className="tbl"><thead><tr><th>Activity</th><th>Name</th><th>Total float (d)</th></tr></thead><tbody>{res.near_critical.slice(0, 200).map((x) => <tr key={x.id}><td><Id id={x.id} /></td><td>{x.name}</td><td style={{ textAlign: 'right' }}>{x.total_float_days}</td></tr>)}</tbody></table>
+          <table className="tbl"><thead><tr><th>Activity</th><th>Name</th><th>Total float (d)</th></tr></thead><tbody>{res.near_critical.map((x) => <tr key={x.id}><td><Id id={x.id} /></td><td>{x.name}</td><td style={{ textAlign: 'right' }}>{x.total_float_days}</td></tr>)}</tbody></table>
           {res.near_critical.length > 200 && <div className="muted">{res.near_critical.length - 200} more: Export… lists all.</div>}
         </div>
       )}
@@ -335,7 +337,7 @@ export function LevelPanel() {
           <table className="tbl"><thead><tr><th>Resource</th><th>Peak (unit-hours/day)</th><th>Limit</th><th>Peak day</th><th>Over-allocated</th></tr></thead>
             <tbody>{res.peaks.map((p) => <tr key={p.resource}><td>{p.resource}</td><td style={{ textAlign: 'right' }}>{n1(p.peak)}</td><td style={{ textAlign: 'right' }}>{n1(p.limit)}</td><td>{date(p.day)}</td><td>{p.overallocated ? 'yes' : ''}</td></tr>)}</tbody></table>
           <table className="tbl" style={{ marginTop: 8 }}><thead><tr><th>Activity</th><th>Early start before</th><th>Start after</th><th>Finish after</th></tr></thead>
-            <tbody>{res.moved.slice(0, 500).map((m) => <tr key={m.id}><td><Id id={m.id} /></td><td>{m.from.slice(0, 16)}</td><td>{m.start.slice(0, 16)}</td><td>{m.finish.slice(0, 16)}</td></tr>)}</tbody></table>
+            <tbody>{res.moved.map((m) => <tr key={m.id}><td><Id id={m.id} /></td><td>{m.from.slice(0, 16)}</td><td>{m.start.slice(0, 16)}</td><td>{m.finish.slice(0, 16)}</td></tr>)}</tbody></table>
           {res.moved.length > 500 && <div className="muted">{res.moved.length - 500} more: Export… lists all.</div>}
         </div>
       )}
@@ -439,7 +441,7 @@ export function ComparePanel() {
     if (!otherId) throw new Error('There is no other project in the database to compare with.');
     return { args: { other_handle: '@other', mode }, parts: { scope: [cur.proj_id], others: { other: [otherId] } } };
   };
-  const cols = res ? [...new Set(res.changes.slice(0, 500).flatMap((c) => Object.keys(c)))] : [];
+  const cols = res ? [...new Set(res.changes.flatMap((c) => Object.keys(c)))] : [];
   return (
     <div style={box}>
       <div style={bar}>
@@ -460,7 +462,7 @@ export function ComparePanel() {
         {res.mode === 'computed' && res.became.length > 0 && <div>Became critical: <Ids ids={res.became} /></div>}
         {res.mode === 'computed' && res.no_longer.length > 0 && <div>No longer critical: <Ids ids={res.no_longer} /></div>}
         <table className="tbl" style={{ marginTop: 4 }}><thead><tr>{cols.map((c) => <th key={c}>{c.replace(/_/g, ' ')}</th>)}</tr></thead>
-          <tbody>{res.changes.slice(0, 500).map((c, i) => <tr key={i}>{cols.map((k) => <td key={k}>{c[k] == null ? '' : String(c[k])}</td>)}</tr>)}</tbody></table>
+          <tbody>{res.changes.map((c, i) => <tr key={i}>{cols.map((k) => <td key={k}>{c[k] == null ? '' : String(c[k])}</td>)}</tr>)}</tbody></table>
         {res.changes.length > 500 && <div className="muted">{res.changes.length - 500} more: Export… lists all.</div>}
       </div>}
     </div>
@@ -488,7 +490,7 @@ export function ReviewPanel() {
           <table className="tbl"><thead><tr><th>Check</th><th>Result</th><th>Found</th><th>Of</th><th>%</th><th>Limit</th></tr></thead>
             <tbody>{res.checks.map((c) => [
               <tr key={c.id} className={open === c.id ? 'sel' : ''} style={{ cursor: 'pointer' }} onMouseDown={() => setOpen(open === c.id ? null : c.id)}><td>{c.title}</td><td style={{ color: open === c.id || c.grade === 'not_assessed' ? undefined : GRADE[c.grade], fontWeight: c.grade === 'fail' ? 'bold' : undefined }}>{c.grade === 'not_assessed' ? 'not assessed' : c.grade}</td><td>{c.count}</td><td>{c.of}</td><td>{c.percent ?? '-'}</td><td>{c.limit}</td></tr>,
-              open === c.id && <tr key={`${c.id}:d`}><td colSpan={6} style={{ whiteSpace: 'normal', background: '#f7f8fa' }}>{c.detail}{c.examples.length > 0 && <ul style={{ margin: '4px 0', paddingLeft: 18 }}>{(c.id === 'saved_dates' ? c.examples : c.examples.slice(0, 10)).map((x) => <li key={x}>{x}</li>)}</ul>}{c.examples_total != null && c.examples_total > 10 && <div className="muted">{c.examples_total - 10} more: Export… lists all.</div>}</td></tr>,
+              open === c.id && <tr key={`${c.id}:d`}><td colSpan={6} style={{ whiteSpace: 'normal', background: '#f7f8fa' }}>{c.detail}{c.examples.length > 0 && <ul style={{ margin: '4px 0', paddingLeft: 18 }}>{(c.id === 'saved_dates' ? c.examples : c.examples.slice(0, LISTED)).map((x) => <li key={x}>{x}</li>)}</ul>}{c.id !== 'saved_dates' && c.examples_total != null && c.examples_total > LISTED && <div className="muted">{c.examples_total - LISTED} more: Export… lists all.</div>}</td></tr>,
             ])}</tbody></table>
         </div>
       )}

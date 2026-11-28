@@ -1,6 +1,7 @@
 // Builds the WBS-banded row list shared by the activity table and the Gantt chart.
 import { parseP6Date } from '../../core/dates.ts';
 import { rows, type Db, type Row } from '../../core/db.ts';
+import { toast } from '../store.ts';
 import { activityPct, isCritical, isMilestone, projectName, statusOf, COLUMN_BY_ID, type Ctx } from '../model.ts';
 
 export interface ActRow {
@@ -45,7 +46,7 @@ export const FILTERS: Record<string, [string, (r: Row, c: Ctx) => boolean]> = {
 
 // User filters (View > Filters > New): rows of "column / is / value", all or any must match. Stored in the
 // database table _FILTER (filter_id, name, json) like saved layouts; ui.filter = "user:<filter_id>".
-export interface UserFilter { any: boolean; rows: { col: string; op: string; value: string }[] }
+export interface UserFilter { any: boolean; rows: { col: string; op: string; value: string }[]; /** the saved text could not be read: why (the filter then shows no activity, and says so) */ unreadable?: string }
 export const FILTER_OPS: Record<string, string> = {
   eq: 'equals', ne: 'is not equal to', gt: 'is greater than', ge: 'is greater than or equal to', lt: 'is less than', le: 'is less than or equal to',
   contains: 'contains', ncontains: 'does not contain', empty: 'is empty', nempty: 'is not empty',
@@ -55,7 +56,7 @@ export function parseUserFilter(json: string): UserFilter {
   try {
     const o = JSON.parse(json) as Partial<UserFilter>;
     return { any: !!o.any, rows: Array.isArray(o.rows) ? o.rows.filter((x) => x && typeof x.col === 'string' && typeof x.op === 'string').map((x) => ({ col: x.col, op: x.op, value: String(x.value ?? '') })) : [] };
-  } catch { return { any: false, rows: [] }; }
+  } catch (e) { return { any: false, rows: [], unreadable: `The saved filter cannot be read (${(e as Error).message}): open it in Filters and save it again.` }; }
 }
 /** Test for a user filter. Cells are compared as shown in the table, but with yyyy-mm-dd hh:mm dates (so dates compare as text) and numbers by value. */
 export function userFilterTest(f: UserFilter, ctx: Ctx): (r: Row) => boolean {
@@ -126,10 +127,14 @@ function sortFor(sortBy: string, ctx: Ctx): (a: Row, b: Row) => number {
 
 /** The Activities toolbar filter box text (kept here so commands such as Select All see the same rows as the table). */
 export const toolbarSearch = { text: '' };
+const saidUnreadable = new Set<string>();
 
 export function buildActivityRows(ctx: Ctx, projIds: string[], collapsed: Record<string, boolean>, filter: string, groupBy: string, sortBy: string, search = ''): ActRow[] {
   const uf = filter.startsWith('user:') ? rows(ctx.db, '_FILTER').find((r) => `user:${r.filter_id}` === filter) : undefined;
-  const ut = uf ? userFilterTest(parseUserFilter(uf.json), ctx) : null;
+  // an unreadable saved filter shows no activity and says why, once (item 26: it showed every activity as if no filter were on)
+  const def = uf ? parseUserFilter(uf.json) : null;
+  if (def?.unreadable && !saidUnreadable.has(filter)) { saidUnreadable.add(filter); toast(`Filter "${uf!.name}": ${def.unreadable}`); }
+  const ut = def ? (def.unreadable ? () => false : userFilterTest(def, ctx)) : null;
   const f = ut ? (r: Row) => ut(r) : FILTERS[filter]?.[1] ?? FILTERS.all[1];
   const q = search.trim().toLowerCase();
   const tasks = [...ctx.taskById.values()].filter((t) => projIds.includes(t.proj_id) && f(t, ctx) && (!q || t.task_code.toLowerCase().includes(q) || t.task_name.toLowerCase().includes(q)));

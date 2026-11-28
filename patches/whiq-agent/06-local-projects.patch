@@ -109,8 +109,8 @@ index 1068565..6cc9674 100644
 +function localProject(body: unknown): { localProjectId?: string; localProjectName?: string } | null {
 +  const b = (body ?? {}) as { localProjectId?: unknown; localProjectName?: unknown };
 +  if (!localProjectsOn() || typeof b.localProjectId !== 'string') return null;
-+  const localProjectId = b.localProjectId.trim().slice(0, 200);
-+  const localProjectName = typeof b.localProjectName === 'string' ? b.localProjectName.trim().slice(0, 200) : '';
++  const localProjectId = b.localProjectId.trim(); // whole (item 26: a cut made two projects alike in their first 200 characters share memories)
++  const localProjectName = typeof b.localProjectName === 'string' ? b.localProjectName.trim() : '';
 +  if (localProjectId && localProjectName) setMemoryProjectName(localProjectId, localProjectName);
 +  return { ...(localProjectId ? { localProjectId } : {}), ...(localProjectName ? { localProjectName } : {}) };
 +}
