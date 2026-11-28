@@ -64,7 +64,7 @@ export function lobView(db: Db, projId: string, m: LobModel, o: { hoursPerDay: n
     if (cal.workBetween(from, to) > 0) out.collisions.push({ location: a.loc.length >= b.loc.length ? a.loc : b.loc, a: a.task, b: b.task, from: new Date(from * 60000).toISOString().slice(0, 10), to: new Date(to * 60000).toISOString().slice(0, 10) });
   }
   out.gaps_total = out.gaps.length; out.collisions_total = out.collisions.length;
-  return cutLobView(out, o.limit ?? 200);
+  return cutLobView(out, o.limit ?? Infinity); // (every location, collision and gap unless a limit is asked: item 26)
 }
 
 /** An edit (MCP edit, the Activities window, Global Change) may not change what the LOB plan sets: an LOB activity's

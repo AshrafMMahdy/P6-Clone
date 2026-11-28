@@ -97,7 +97,7 @@ export function linkElements(db: Db, projId: string, input: LinkInput[], mode: '
       added++;
     }
   }
-  return { added, removed, links: realOf(T.rows).reduce((n, r) => n + (r.proj_id === projId ? 1 : 0), 0), ...(unknownActivities.length ? { unknown_activities: unknownActivities } : {}), ...(unknownGuids.length ? { unknown_guids: unknownGuids.slice(0, 200), unknown_guid_count: unknownGuids.length } : {}) };
+  return { added, removed, links: realOf(T.rows).reduce((n, r) => n + (r.proj_id === projId ? 1 : 0), 0), ...(unknownActivities.length ? { unknown_activities: unknownActivities } : {}), ...(unknownGuids.length ? { unknown_guids: unknownGuids } : {}) };
 }
 
 // ── rules (Navisworks Auto-Attach, SYNCHRO Auto-Matching) ──────────────────────────────────────────────────────────
@@ -190,7 +190,7 @@ export function linkByRules(db: Db, projId: string, ix: IfcIndex, rules: Rule[],
     proposed += n;
     // one activity: its GlobalIds are distinct (one push per element); several: counted once each
     const matched = out.size <= 1 ? n : new Set([...out.values()].flat()).size;
-    previews.push({ rule: i + 1, type: rule.type, matched_elements: matched, activities: out.size, links: n, examples: [...out].slice(0, 5).map(([a, g]) => ({ activity: a, guids: g.slice(0, 5) })), ...(problems.length ? { problems } : {}) });
+    previews.push({ rule: i + 1, type: rule.type, matched_elements: matched, activities: out.size, links: n, examples: [...out].map(([a, g]) => ({ activity: a, guids: g })), ...(problems.length ? { problems } : {}) });
   });
   // an element linked as "built" by two different activities from rules is worth a look (many-to-many is allowed);
   // counted by element ordinal, so a model of millions of elements needs a few MB for it
@@ -207,7 +207,7 @@ export function linkByRules(db: Db, projId: string, ix: IfcIndex, rules: Rule[],
       else if (acts[first[o]] !== g.activity) (clash.get(o) ?? clash.set(o, new Set([acts[first[o]]])).get(o)!).add(g.activity);
     }
   }
-  const conflicts = [...[...clash].map(([o, set]) => [ix.elements[o].guid, set] as const), ...[...outside].filter(([, set]) => set.size > 1)].slice(0, 100).map(([g, set]) => ({ guid: g, activities: [...set] }));
+  const conflicts = [...[...clash].map(([o, set]) => [ix.elements[o].guid, set] as const), ...[...outside].filter(([, set]) => set.size > 1)].map(([g, set]) => ({ guid: g, activities: [...set] }));
   let applied: ReturnType<typeof linkElements> | undefined;
   if (!dryRun) {
     applied = linkElements(db, projId, [...grouped.values()], 'add', ix);
@@ -239,9 +239,9 @@ export function linkStatus(db: Db, projId: string, ix: IfcIndex | null) {
   return {
     model: modelRow(db, projId)?.path ?? null, elements: ix?.elements.length ?? null, links: L.length, linked_elements: byGuid.size,
     unlinked_elements: ix ? unlinked.length : null, unlinked_by_class: unlinkedBy((e) => e.ifcClass), unlinked_by_storey: unlinkedBy((e) => e.storey),
-    activities_without_elements: T.filter((t) => !withEls.has(t.task_id) && t.task_type === 'TT_Task').slice(0, 200).map((t) => t.task_code),
-    elements_on_several_activities: [...byGuid].filter(([, s]) => s.size > 1).slice(0, 200).map(([g, s]) => ({ guid: g, activities: [...s] })),
-    links_to_missing_elements: known ? L.filter((l) => !known.has(l.guid)).slice(0, 200).map((l) => ({ activity: l.activity, guid: l.guid })) : null,
+    activities_without_elements: T.filter((t) => !withEls.has(t.task_id) && t.task_type === 'TT_Task').map((t) => t.task_code),
+    elements_on_several_activities: [...byGuid].filter(([, s]) => s.size > 1).map(([g, s]) => ({ guid: g, activities: [...s] })),
+    links_to_missing_elements: known ? L.filter((l) => !known.has(l.guid)).map((l) => ({ activity: l.activity, guid: l.guid })) : null,
   };
 }
 

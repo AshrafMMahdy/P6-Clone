@@ -304,17 +304,18 @@ test('lob_view: limit cuts the lists (their _totals say how many there are), the
   const c = await call('lob_create', { handle: np.handle, owner_key: np.owner_key, id: 'TOWER', start: '2026-03-02', locations: { levels: ['Floor'], grid: [8] }, tasks: TASKS, links: [{ pred: 'CS', succ: 'DW' }] });
   assert.equal(c.err, false, JSON.stringify(c.d).slice(0, 300));
   const v = (await call('lob_view', { handle: np.handle, project: 'TOWER', limit: 3, export: folder() })).d;
-  assert.ok(v.tasks.every((t: any) => t.locations.length === 3 && t.locations_total === 8));
+  assert.ok(v.tasks?.every((t: any) => t.locations.length === 3 && t.locations_total === 8), JSON.stringify(v).slice(0, 400));
   const { json, csv } = files(v, 'lob_view');
   assert.equal(csv.locations.length, 16); assert.equal(csv.trades.length, 2);
   assert.ok(json.tasks.every((t: any) => t.locations.length === 8));
   assert.equal(csv.gaps.length, v.gaps_total); assert.equal(csv.collisions.length, v.collisions_total);
   assert.equal(csv.segments.length, json.tasks.reduce((s: number, t: any) => s + t.segments.length, 0));
-  // limit 0 lists everything, as max_ids 0 does elsewhere
-  const all = (await call('lob_view', { handle: np.handle, project: 'TOWER', limit: 0 })).d;
+  // no limit lists everything (item 26: a reading tool returns what is asked); limit 0 is refused, not read as "all"
+  assert.equal((await call('lob_view', { handle: np.handle, project: 'TOWER', limit: 0 })).d.error?.code, 'bad_input');
+  const all = (await call('lob_view', { handle: np.handle, project: 'TOWER' })).d;
   assert.ok(all.tasks.every((t: any) => t.locations.length === 8), JSON.stringify(all.tasks.map((t: any) => t.locations.length)));
   assert.equal(all.gaps.length, all.gaps_total); assert.equal(all.collisions.length, all.collisions_total);
-  assert.match((await import('../mcp/server.ts')).toolsList().find((t: any) => t.name === 'lob_view')!.description, /limit \(default 200; 0 = all\)/);
+  assert.match((await import('../mcp/server.ts')).toolsList().find((t: any) => t.name === 'lob_view')!.description, /limit \(default: every one\)/);
 });
 
 test('optimize_schedule: the export lists every activity under CPM, P6 leveling and the reasoner, and the whole priority order', { skip: !reasonerModelPath() && 'models/reasoner.onnx is not present' }, async () => {

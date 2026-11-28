@@ -11,16 +11,17 @@ import { locationDurations } from './edit.ts';
 import type { LobModel } from './model.ts';
 
 export interface LobAlarm { pred: string; succ: string; location: string; predFinish: string; succStart: string; daysToReact: number }
-export interface LobForecast { dataDate: string; rates: Record<string, number>; forecast: Record<string, [string, string][]>; alarms: LobAlarm[] }
+export interface LobForecast { dataDate: string; dataDateNote?: string; windowDays: number; rates: Record<string, number>; forecast: Record<string, [string, string][]>; alarms: LobAlarm[] }
 
 export function forecastLob(db: Db, projId: string, m: LobModel, o: { windowDays?: number; hoursPerDay: number }): LobForecast {
   const proj = rows(db, 'PROJECT').find((p) => p.proj_id === projId)!;
   const cal = calendarResolver(db, []).fallback(proj.clndr_id);
-  const dd = parseP6Date(proj.last_recalc_date) ?? Math.floor(Date.now() / 60000);
+  // a plan with no data date is forecast from today, and the answer says so (item 26: a default is said, never silent)
+  const stated = parseP6Date(proj.last_recalc_date), dd = stated ?? Math.floor(Date.now() / 60000);
   const byCode = new Map(rows(db, 'TASK').filter((t) => t.proj_id === projId).map((t) => [t.task_code, t]));
   const windowStart = cal.subWork(dd, (o.windowDays ?? 21) * o.hoursPerDay * 60);
   const days = (a: number, b: number) => cal.workBetween(a, b) / 60 / o.hoursPerDay;
-  const out: LobForecast = { dataDate: formatP6Date(dd), rates: {}, forecast: {}, alarms: [] };
+  const out: LobForecast = { dataDate: formatP6Date(dd), ...(stated == null ? { dataDateNote: `${proj.proj_short_name} has no data date: forecast from today, ${formatP6Date(dd).slice(0, 10)}.` } : {}), windowDays: o.windowDays ?? 21, rates: {}, forecast: {}, alarms: [] };
   const fc = new Map<string, [number, number]>();
   for (const t of m.tasks) {
     const d = locationDurations(m, t), locs = t.order.filter((c) => d.has(c));

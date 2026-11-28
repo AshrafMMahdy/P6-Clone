@@ -389,6 +389,8 @@ const isFolder = (p: string): boolean => { try { return statSync(p).isDirectory(
 const distOf = (v: unknown): 'triangle' | 'uniform' | 'betapert' => (v == null ? 'triangle' : v === 'triangle' || v === 'uniform' || v === 'betapert' ? v : fail('bad_input', `default_estimates.dist ${JSON.stringify(v)} is not an accepted value. dist is one of: triangle, uniform, betapert.`, 'Leave it out for triangle.'));
 /** compare's lists: its changes, and the computed mode's critical and one-side lists. */
 const COMPARE_LISTS = ['changes', 'became_critical', 'no_longer_critical', 'only_in_a', 'only_in_b'] as const;
+/** The 4D and LOB tools' lists (item 26, rule 3); a reading tool's own list (list_elements' elements, element_info, lob_view's rows) is not among them. */
+const MODEL_LISTS = ['unknown_guids', 'unknown_activities', 'examples', 'guids', 'conflicts', 'activities_without_elements', 'elements_on_several_activities', 'links_to_missing_elements', 'lost_elements', 'matched_examples', 'unmatched_tasks', 'task_list', 'would_create', 'late_elements', 'ahead_elements', 'misfits'] as const;
 /** transfer_progress's lists: the changes, the unmatched activities of their file, the ambiguous ones, and the unmatched assignments, expenses and steps. */
 const TRANSFER_LISTS = ['changes', 'unmatched_from', 'ambiguous', 'unmatched'] as const;
 function cutListed<T>(answer: T, keys: readonly string[]): T {
@@ -1350,6 +1352,8 @@ async function callToolRun(name: string, a: Record<string, any>, sessionCaller?:
     // (item 26, rule 3: the lists a result-file tool gave whole are cut to the first 25 with their total — not for the desktop's own screens,
     // which draw every row; noteCuts then names the result file that holds them)
     if (plain && !config.screens && LIST_KEYS[name]) out = cutListed(out, LIST_KEYS[name]);
+    // (the 4D and LOB tools keep no result file of their own: their lists are cut the same way, the whole answer written once to a file)
+    if (plain && !config.screens && (FOURD_NAMES.has(name) || LOB_NAMES.has(name))) out = listedAnswer(name, out, MODEL_LISTS);
     if (plain) out = noteCuts(out, name); // where the whole of each cut list is, when an export was written (export.ts)
     if (plain && handle && READS_SAVED_DATES.has(name) && !(out as { error?: unknown }).error && !(out as { job_id?: unknown }).job_id) {
       const s0 = sessions.get(handle), said = s0 ? savedDatesNotes(s0, a.project) : [];

@@ -50,7 +50,7 @@ test('4D: a SYNCHRO project (.sp) comes in as activities and their element links
   const dry = await call('import_4d', { handle: h, owner_key, path: schepSp, link: false, create_activities: true });
   assert.equal(dry.err, false, JSON.stringify(dry.d).slice(0, 400));
   assert.equal(dry.d.source, 'synchro');
-  assert.ok(dry.d.would_create.length > 100, `${dry.d.would_create.length} activities to create`);
+  assert.ok((dry.d.would_create_total ?? dry.d.would_create.length) > 100 && dry.d.would_create.length === 25, `${dry.d.would_create_total} activities to create, 25 listed (item 26)`);
   const r = await call('import_4d', { handle: h, owner_key, path: schepSp, create_activities: true });
   assert.equal(r.err, false, JSON.stringify(r.d).slice(0, 400));
   assert.ok(r.d.created_activities.some((a: { id: string }) => a.id === 'ST00020'), 'SYNCHRO task IDs kept as Activity IDs');
