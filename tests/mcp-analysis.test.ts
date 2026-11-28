@@ -97,7 +97,7 @@ test('MCP: count arguments are whole numbers: a value that is not one is refused
     const r = await call(tool, { handle: h, ...extra, [arg]: v });
     assert.equal(r.d.error?.code, 'bad_input', `${tool} ${arg} ${String(v)}: ${JSON.stringify(r.d).slice(0, 160)}`);
     // (a value of another type — a text, true, a list — is refused by the server's type check, item 26; a number that is not whole by the tool)
-    assert.match(r.d.error.message, new RegExp(`^(${tool}: )?${arg} must be a (whole number of 0 or more|number \\(not in quotes\\))`), r.d.error.message);
+    assert.match(r.d.error.message, new RegExp(`^(${tool}: )?${arg} must be a (whole number of [01] or more|number \\(not in quotes\\))`), r.d.error.message);
   };
   for (const v of bads) {
     await refused('float_paths', 'count', v);

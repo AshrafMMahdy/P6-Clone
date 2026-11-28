@@ -28,7 +28,7 @@ export function storedFloatPathOptions(db: Db, projId: string): (FloatPathOption
 }
 
 export function computeFloatPaths(db: Db, projIds: string[], o: FloatPathOptions = {}): { end: string | null; method: string; paths: FloatPath[]; assign: Map<string, { path: number; order: number }> } {
-  const method = o.method ?? 'free_float', count = Math.max(1, Math.floor(o.count ?? 10));
+  const method = o.method ?? 'free_float', count = o.count ?? 10; // (P6's default 10 paths; the MCP refuses a count under 1: countArg)
   const open = new Set(projIds);
   const tasks = rows(db, 'TASK').filter((t) => open.has(t.proj_id) && t.task_type !== 'TT_WBS');
   const ctx = makeCtx(db, { hoursPerDay: 8 });

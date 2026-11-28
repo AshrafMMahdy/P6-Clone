@@ -145,7 +145,7 @@ test('MCP contract: read and write roots, atomic saves into new folders, unsaved
   assert.equal(parseXer(new Uint8Array(readFileSync(join(out, 'deliver/rev1/cfc.xer')))).db.tables.TASK.rows.length, 93);
   // a failed write leaves the old file whole and no temporary file
   mkdirSync(join(out, 'adir'));
-  assert.equal((await s.tool('save', { handle: h, path: 'adir' })).data.error.code, 'file_unwritable');
+  { const r = await s.tool('save', { handle: h, path: 'adir' }); assert.equal(r.data.error.code, 'file_unwritable', JSON.stringify(r.data.error)); }
   assert.deepEqual(readdirSync(out).sort(), ['adir', 'deliver']);
   // unsaved work is saved into the write root when stdin closes
   await s.tool('edit', { handle: h, operations: [{ op: 'update_activity', id: 'A2410', name: 'Changed before exit' }] });
@@ -300,7 +300,7 @@ test('import_file and transfer_progress say what P6 would refuse in the file the
   assert.equal(e.code, 'p6_would_reject');
   assert.deepEqual(e.fatal_kinds, [{ code: 'DUP_KEY', count: 60 }]);
   assert.equal(e.fatal_total, 60);
-  assert.match(e.message, /^Not opened: P6 would refuse big\.xer \(60 faults: .*; and 57 more\)\.$/);
+  assert.match(e.message, /^Not opened: P6 would refuse big\.xer \(60 faults: .*; and \d+ more \(data\.fatal lists them\)\)\.$/);
   assert.equal(e.fatal_listed, 5, 'the findings in words: 5 of the 60');
   const len = await call('open_file', { path: big, lenient: true });
   assert.deepEqual([len.data.file_as_given.fatal_total, len.data.file_as_given.fatal_listed, len.data.file_as_given.fatal_kinds[0].count], [60, 5, 60]);

@@ -20,11 +20,11 @@ export interface ScenarioResult {
   critical?: number; became_critical?: string[]; no_longer_critical?: string[]; negative_float?: number;
   cost?: number; cost_delta?: number;
   changed?: { id: string; start: [string | null, string | null]; finish: [string | null, string | null] }[];
-  /** how many activities' dates the scenario moved (changed lists the first 200) */
+  /** how many activities' dates the scenario moved (changed lists the first 25: LISTED) */
   changed_total?: number;
 }
 /** A finished scenario as a store keeps it: its index, its row, and (a scenario that scheduled) every activity whose dates it moved,
- *  which the answer gives for the best few (the first 200 of them) and an export for all. */
+ *  which the answer gives for the best few (the first 25 of them) and an export for all. */
 export interface KeptScenario { i: number; row: ScenarioResult; changed: NonNullable<ScenarioResult['changed']> | null }
 /** Where a batch keeps each finished scenario as it is done (the MCP server: a file in the write root, mcp/keptRuns.ts): a batch that
  *  stops (cancelled, its worker or process ended) is continued from it by a later call, which answers what an uninterrupted one does. */

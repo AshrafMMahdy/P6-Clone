@@ -144,9 +144,10 @@ export function clearEstimates(db: Db, taskIds?: string[]): void {
 /**
  * Default three-point estimates for every open activity of the projects:
  * min = remaining x minPct %, most likely = remaining, max = remaining x maxPct %, triangle.
- * Replaces existing estimates of those activities. Returns the number of activities estimated.
+ * Replaces existing estimates of those activities (the desktop's Set Default Estimates), or with keepExisting leaves an activity that has one
+ * as it is (the MCP's default_estimates: "to activities without one"). Returns the number of activities estimated.
  */
-export function defaultEstimates(db: Db, projIds: string[], minPct = 90, maxPct = 125, dist: Dist = 'triangle'): number {
+export function defaultEstimates(db: Db, projIds: string[], minPct = 90, maxPct = 125, dist: Dist = 'triangle', keepExisting = false): number {
   const s = new Set(projIds);
   const t = estTable(db);
   const byTask = new Map(t.rows.map((r) => [r.task_id, r]));
@@ -156,6 +157,7 @@ export function defaultEstimates(db: Db, projIds: string[], minPct = 90, maxPct 
     const h = remainingHours(task);
     const r: Row = { task_id: task.task_id, min_hr: p6num((h * minPct) / 100), ml_hr: p6num(h), max_hr: p6num((h * maxPct) / 100), dist };
     const old = byTask.get(task.task_id);
+    if (old && keepExisting) continue;
     if (old) Object.assign(old, r); else t.rows.push(r);
     n++;
   }
