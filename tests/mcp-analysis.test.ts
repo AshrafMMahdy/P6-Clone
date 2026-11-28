@@ -101,7 +101,6 @@ test('MCP: count arguments are whole numbers: a value that is not one is refused
   };
   for (const v of bads) {
     await refused('float_paths', 'count', v);
-    await refused('optimize_schedule', 'max_changes', v);
     await refused('optimize_schedule', 'samples', v);
     // (transfer_progress has no max_changes or offset any more: every list shows its first 25 with its total and a file, item 26)
   }

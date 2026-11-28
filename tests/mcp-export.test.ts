@@ -324,15 +324,15 @@ test('optimize_schedule: the export lists every activity under CPM, P6 leveling 
   assert.equal((await call('edit', { handle: np.handle, owner_key: np.owner_key, operations: ops })).err, false);
   await call('schedule', { handle: np.handle, owner_key: np.owner_key });
   const r = (await call('optimize_schedule', { handle: np.handle, seed: 1, samples: 4, export: folder() })).d;
-  assert.equal(r.priority.length, 100); assert.equal(r.priority_total, 110);
+  assert.equal(r.priority.length, 25); assert.equal(r.priority_total, 110); // (the list rule: item 26)
   const { json, csv } = files(r, 'optimize_schedule');
   assert.equal(csv.priority.length, 110); assert.equal(json.priority.length, 110);
-  assert.deepEqual(csv.priority.slice(0, 100).map((x) => x.id), r.priority);
+  assert.deepEqual(csv.priority.slice(0, 25).map((x) => x.id), r.priority);
   assert.equal(csv.activities.length, 110);
   assert.ok(csv.activities.every((x) => x.cpm_start && x.reasoner_finish && x.finish_delta_days !== ''));
   assert.equal(csv.activities.map((x) => x.reasoner_finish).sort().at(-1), r.reasoner_finish);
   assert.equal(csv.activities.map((x) => x.cpm_finish).sort().at(-1), r.cpm_finish);
-  // biggest_changes: the answer shows the first 25 (max_changes), the export every activity whose dates differ from CPM, largest first
+  // biggest_changes: the answer shows the first 25, the export every activity whose dates differ from CPM, largest first
   assert.ok(r.biggest_changes_total > 25, `${r.biggest_changes_total} activities changed`);
   assert.equal(r.biggest_changes.length, 25);
   assert.equal(csv.biggest_changes.length, r.biggest_changes_total); assert.equal(json.biggest_changes.length, r.biggest_changes_total);
@@ -342,10 +342,8 @@ test('optimize_schedule: the export lists every activity under CPM, P6 leveling 
   assert.ok(csv.biggest_changes.every((x) => x.cpm_start !== x.reasoner_start || x.cpm_finish !== x.reasoner_finish), 'only activities whose dates differ');
   const act = new Map(csv.activities.map((x) => [x.id, x]));
   assert.equal(act.get(r.biggest_changes[0].id)!.finish_delta_days, String(r.biggest_changes[0].finish_delta_days));
-  const some = (await call('optimize_schedule', { handle: np.handle, seed: 1, samples: 4, max_changes: 4 })).d;
-  assert.equal(some.biggest_changes.length, 4); assert.equal(some.biggest_changes_total, r.biggest_changes_total);
-  const every = (await call('optimize_schedule', { handle: np.handle, seed: 1, samples: 4, max_changes: 0 })).d;
-  assert.equal(every.biggest_changes.length, r.biggest_changes_total, 'max_changes 0 = all');
+  // (item 26: the first 25, always; no max_changes)
+  assert.equal(r.biggest_changes.length, Math.min(25, r.biggest_changes_total));
   assert.match((await import('../mcp/server.ts')).toolsList().find((t: any) => t.name === 'optimize_schedule')!.description, /review biggest_changes[^]*undo takes the apply back[^]*better_than_p6_leveler: false means P6/);
 });
 

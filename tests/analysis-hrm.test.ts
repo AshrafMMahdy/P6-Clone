@@ -504,7 +504,7 @@ test('optimize_schedule: a cancel at either check in real dates keeps the propos
 });
 let cancelledFlag = false;
 
-test('optimize_schedule max_priority: the order listed is as long as asked (default 100, 0 = all), priority_total and the whole order stay', async () => {
+test('optimize_schedule max_priority (core): the order listed is as long as asked (default 25, the list rule; 0 = all, the desktop screens), priority_total and the whole order stay', async () => {
   const { db, pid } = project(4);
   const infer = async (x: ReasonerInputs) => stand(Array.from({ length: x.n }, (_, k) => Math.sin(k)));
   const crash = [{ id: 'A5', crash_days: 4, crash_cost: 900 }];
@@ -512,7 +512,7 @@ test('optimize_schedule max_priority: the order listed is as long as asked (defa
   const three = await optimizeSchedule(db, [pid], { samples: 1, seed: 1, activities: crash, maxPriority: 3 }, infer, () => undefined);
   const all = await optimizeSchedule(db, [pid], { samples: 1, seed: 1, activities: crash, maxPriority: 0 }, infer, () => undefined);
   assert.ok(dflt.ok && three.ok && all.ok);
-  assert.equal(dflt.priority.length, 12, 'fewer than 100: all of them');
+  assert.equal(dflt.priority.length, 12, 'fewer than 25: all of them');
   assert.deepEqual(three.priority, all.priority.slice(0, 3));
   assert.equal(three.priority_total, 12);
   assert.equal(all.priority.length, 12);
@@ -624,9 +624,9 @@ test('MCP optimize_schedule and crash_schedule apply: a field of another type wi
   assert.deepEqual(await durations(), was, 'a cancel after the leveling in the proposed order applied nothing');
   const ok = await call('optimize_schedule', { ...args, apply: true });
   assert.equal(ok.d.applied, true, JSON.stringify(ok.d).slice(0, 300));
-  // max_priority through the tool
-  const two = await call('optimize_schedule', { ...args, max_priority: 2 }), every = await call('optimize_schedule', { ...args, max_priority: 0 });
-  assert.equal(two.d.priority.length, 2); assert.equal(two.d.priority_total, 3);
-  assert.equal(every.d.priority.length, 3);
-  assert.equal((await call('optimize_schedule', { ...args, max_priority: -1 })).d.error?.code, 'bad_input');
+  // the tool lists the first 25 of the order (item 26: no max_priority; a max_priority sent is said not used)
+  const every = await call('optimize_schedule', { ...args });
+  assert.equal(every.d.priority.length, 3); assert.equal(every.d.priority_total, 3);
+  const sent = await call('optimize_schedule', { ...args, max_priority: 2 });
+  assert.equal(sent.d.priority.length, 3); assert.ok((sent.d.notes ?? []).some((n: string) => /has no argument "max_priority"/.test(n)), JSON.stringify(sent.d.notes));
 });

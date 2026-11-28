@@ -6,7 +6,7 @@
 // P6's leveling with the project's leveling settings, so the answer is in real dates. Inference is passed in (infer), so this file stays pure: the
 // MCP server and CLI run the model in Node (hrmRuntime.ts), the desktop app through its main process.
 import { maxOf, minOf } from '../arrays.ts';
-import { DataError } from '../notes.ts';
+import { DataError, LISTED } from '../notes.ts';
 import { rows, type Db, type Row } from '../db.ts';
 import { formatP6Date, parseP6Date } from '../dates.ts';
 import { dayHours } from '../project/units.ts';
@@ -355,7 +355,7 @@ export function proposalOps(inst: HrmInstance, modes: number[], multi: boolean, 
 
 const finishOf = (d: Db, projIds: string[]) => { const open = new Set(projIds); let f = -Infinity; for (const t of rows(d, 'TASK')) if (open.has(t.proj_id)) { const v = parseP6Date(t.act_end_date || t.reend_date || t.early_end_date); if (v != null && v > f) f = v; } return Number.isFinite(f) ? f : null; };
 
-/** maxPriority: how many of the placement order `priority` lists (default 100; 0 = all); the whole order is in `priority_rows` and `order`. */
+/** maxPriority: how many of the placement order `priority` lists (default LISTED, 25; 0 = all: the desktop's screens); the whole order is in `priority_rows` and `order`. */
 export interface OptimizeOptions { samples?: number; seed?: number; activities?: CrashActivity[]; hoursPerDay?: number; tick?: Tick; maxPriority?: number }
 
 export async function optimizeSchedule(db: Db, projIds: string[], o: OptimizeOptions, infer: Infer, applyOps: (d: Db, ops: unknown[]) => void) {
@@ -434,7 +434,7 @@ export async function optimizeSchedule(db: Db, projIds: string[], o: OptimizeOpt
     sgs_makespan_days: best.makespan, crash_cost: Math.round(best.cost * 100) / 100,
     changes: inst.acts.flatMap((a, i) => (best.modes[i] ? [{ id: a.task.task_code, from_days: a.duration, to_days: a.modes[best.modes[i]].duration, cost: a.modes[best.modes[i]].cost }] : [])),
     // more than one project in the run: an Activity ID can be in several, so each entry names its project (priority: {id, project}; priority_rows: {id, project, name})
-    priority: (o.maxPriority ? order.slice(0, o.maxPriority) : o.maxPriority === 0 ? order : order.slice(0, 100)).map((id) => { const t = byTask.get(id)!.task; return multi ? { id: t.task_code as string, project: projCode.get(t.proj_id) as string } : (t.task_code as string); }), priority_total: order.length,
+    priority: (o.maxPriority ? order.slice(0, o.maxPriority) : o.maxPriority === 0 ? order : order.slice(0, LISTED)).map((id) => { const t = byTask.get(id)!.task; return multi ? { id: t.task_code as string, project: projCode.get(t.proj_id) as string } : (t.task_code as string); }), priority_total: order.length,
     ops, order, priority_rows: order.map((id) => { const t = byTask.get(id)!.task; return { id: t.task_code as string, ...(multi ? { project: projCode.get(t.proj_id) as string } : {}), name: t.task_name as string }; }),
     /** for the fields an apply writes beside each activity (whiq-fields.ts): the activities whose duration the run changed, and the
      *  placement order of every leveled activity (its place in `order`, 1 = first) */
