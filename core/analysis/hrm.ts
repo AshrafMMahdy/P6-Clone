@@ -405,7 +405,7 @@ export async function optimizeSchedule(db: Db, projIds: string[], o: OptimizeOpt
     return { taskId: t.task_id, code: t.task_code, name: t.task_name, cpm, p6: p6!.dates.get(t.task_id)!, reasoner: mod, startDeltaDays: wd(cpm[0], mod[0]), finishDeltaDays: wd(cpm[1], mod[1]) };
   });
   // the activities whose dates the reasoner's proposal moves against CPM, the largest finish shift first, then the largest start shift
-  // (all of them: the answer shows the first max_changes, the export every one)
+  // (all of them: the answer lists the first 25 by the list rule, the export every one)
   const shift = (v: number | null) => Math.abs(v ?? 0);
   const biggest = dates.filter((x) => x.cpm[0] !== x.reasoner[0] || x.cpm[1] !== x.reasoner[1])
     .sort((x, y) => shift(y.finishDeltaDays) - shift(x.finishDeltaDays) || shift(y.startDeltaDays) - shift(x.startDeltaDays))

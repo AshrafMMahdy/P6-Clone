@@ -308,10 +308,16 @@ test('06A506c: an activity riding the status date over the update before (not st
   for (const [code, r1, r2] of [['B', '40', '32'], ['D', '40', '8']] as const) { set(prev, code, { act_start_date: '2026-01-05 00:00', remain_drtn_hr_cnt: r1, restart_date: '2026-01-05 00:00' }); set(cur, code, { act_start_date: '2026-01-05 00:00', remain_drtn_hr_cnt: r2, restart_date: '2026-01-05 00:00' }); }
   set(prev, 'E', { restart_date: '2026-01-06 00:00', early_start_date: '2026-01-06 00:00' }); set(cur, 'E', { act_start_date: '2026-01-06 00:00', act_end_date: '2026-01-09 00:00', remain_drtn_hr_cnt: '0' });
   const updates = [{ name: 'first', db: prev.db, projId: prev.projId }, { name: 'now', db: cur.db, projId: cur.projId }];
+  // the remaining durations are read in days of the activity's own calendar: on the fixture's 24-hour calendar D (40 h, then 8 h: 1.7 d, then 0.3 d) rides
+  assert.deepEqual(ids(by(decm(cur.db, { updates }))['06A506c']), ['A', 'B', 'D']);
+  // on an 8-hour calendar it is 5 d, then 1 d: it does not
+  for (const b of [prev, cur]) rows(b.db, 'CALENDAR')[0].day_hr_cnt = '8';
   const c = by(decm(cur.db, { updates }))['06A506c'];
   assert.deepEqual(ids(c), ['A', 'B']);
   assert.deepEqual([c.numerator, c.denominator, c.metric, c.result], [2, 4, 50, 'fail']);
   assert.deepEqual(c.activities.map((x) => x.value), ['forecast start 2 d after the status date at first, 2 d after it now', 'remaining duration 5 d at first, 4 d now']);
+  // the windows are said in the check (rule 7: a threshold is visible)
+  assert.equal(c.detail!.rides_when, "not started at both updates with its forecast start within 5 calendar days after each update's status date, or under way at both with its remaining duration within 2 days (of its own calendar) of its value at first");
   // not assessed: no update; this project the earliest; the update before at the same status date
   assert.match(by(decm(cur.db, {}))['06A506c'].note!, /no earlier update was given; pass updates\.$/);
   assert.match(by(decm(prev.db, { updates }))['06A506c'].note!, /this project \(first\) has the earliest data date of the updates given; pass the update before it\.$/);

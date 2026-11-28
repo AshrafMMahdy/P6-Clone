@@ -300,7 +300,11 @@ test('import_file and transfer_progress say what P6 would refuse in the file the
   assert.equal(e.code, 'p6_would_reject');
   assert.deepEqual(e.fatal_kinds, [{ code: 'DUP_KEY', count: 60 }]);
   assert.equal(e.fatal_total, 60);
-  assert.match(e.message, /^Not opened: P6 would refuse big\.xer \(60 faults: .*; and \d+ more \(data\.fatal lists them\)\)\.$/);
+  assert.match(e.message, /^Not opened: P6 would refuse big\.xer \(60 faults: .*; and \d+ more \(data\.fatal lists 25; every one is in the file data\.fatal_note names\)\)\.$/);
+  // the list rule on data.fatal: 25, and the file its note names holds all 60
+  assert.equal(e.fatal.length, 25);
+  const whole = readFileSync(/ in (.+\.csv)\.$/.exec(e.fatal_note)![1], 'utf8').split('\r\n');
+  assert.equal(whole.length - 1, 60, 'a header and the 60 findings');
   assert.equal(e.fatal_listed, 5, 'the findings in words: 5 of the 60');
   const len = await call('open_file', { path: big, lenient: true });
   assert.deepEqual([len.data.file_as_given.fatal_total, len.data.file_as_given.fatal_listed, len.data.file_as_given.fatal_kinds[0].count], [60, 5, 60]);

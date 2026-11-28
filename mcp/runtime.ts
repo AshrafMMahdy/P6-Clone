@@ -10,6 +10,7 @@
 //  - With a root folder, every path is confined to it (symlinks resolved); --automation-read-root / --automation-write-root
 //    fence reads (read or write root) and writes (write root) separately, like the craft forks.
 //  - Every failure is a ToolError with a code and a next step.
+import { envNumber } from '../core/env.ts';
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, readSync, realpathSync, renameSync, rmdirSync, statSync, unlinkSync, writeFileSync, writeSync } from 'node:fs';
 import { DataError, stillWorking } from '../core/notes.ts';
 import { execFileSync } from 'node:child_process';
@@ -56,15 +57,8 @@ export interface Config {
    *  lists every activity and gives the engine's own whole-day histogram, which the Risks window reads whole. Never set for an MCP server. */
   screens: boolean;
 }
-/** A setting from the environment: absent or empty is the default; anything else must be a positive number, or the server does not start
- *  and says which (item 26: a mis-set budget no longer runs as the default without a word). */
-const num = (name: string, d: number): number => {
-  const v = process.env[name];
-  if (v == null || v === '') return d;
-  const n = Number(v);
-  if (Number.isFinite(n) && n > 0) return n;
-  throw new Error(`${name}=${JSON.stringify(v)} is not a positive number: set it to one, or unset it for the default (${d}).`);
-};
+/** A setting from the environment (core/env.ts): a mis-set one stops the server from starting and says which. */
+const num = (name: string, d: number): number => envNumber(name, d);
 export const config: Config = {
   root: null, readRoot: null, writeRoot: null, requireOwnerKey: false,
   // AGREED LIMIT (owner, 2026-11-28, item 26 rule 5): 8 projects open at once (P6CLONE_MAX_HANDLES) — a 9th moves the least recently used idle one out of

@@ -41,8 +41,8 @@ export const dataDir = (...parts: string[]): string => { const d = join(dataRoot
 export const dataFile = (...parts: string[]): string => { const f = join(dataRoot(), ...parts); mkdirSync(dirname(f), { recursive: true }); return f; };
 
 /** What the AppData layout had, and where it goes. */
-// (in this order: the agent's logs and caches leave its folder before the rest of it becomes Agent, and Agent exists
-// before the panel's own chats go into it)
+// (in this order: the agent's logs and caches leave its folder before the rest of it becomes Agent; the panel's own chats of the
+// old model loop are not moved: nothing reads them now, item 26)
 const LEGACY: [string, string[]][] = [
   ['p6clone-db.json', ['Database', 'p6clone-db.json']],
   ['ai-assistant.json', ['Settings', 'ai-assistant.json']],
@@ -52,7 +52,6 @@ const LEGACY: [string, string[]][] = [
   ['whiq/pqvae-text-cache', ['Cache', 'pqvae-text']],
   ['whiq/sandbox-snapshots', ['Cache', 'sandbox-snapshots']],
   ['whiq', ['Agent']],
-  ['ai-chats', ['Agent', 'panel-chats']],
 ];
 
 /** Moves the AppData layout's data into the data root, once (a target that exists is never overwritten). Returns what moved. */

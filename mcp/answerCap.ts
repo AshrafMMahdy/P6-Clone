@@ -42,8 +42,13 @@ export function cutAnswer(out: unknown, text: string, maxChars: number): CutAnsw
     const s = JSON.stringify(cut);
     if (s.length <= maxChars) return { value: cut, keptChars: s.length, itemsKept: arrayKeep };
   }
-  const plain = text.slice(0, Math.max(FLOOR_CHARS, maxChars) - 200) + ` …[${text.length - maxChars} characters cut]`;
-  return { value: plain, keptChars: plain.length, itemsKept: 0 };
+  // the cut text goes into the answer as a string: its quotes and backslashes are escaped there, so the slice is sized by its
+  // escaped length (a flat object of 20,000 keys came back at 172,838 characters: blind review, item 26)
+  const limit = Math.max(FLOOR_CHARS, maxChars) - 200;
+  let n = Math.min(text.length, limit);
+  for (let esc = JSON.stringify(text.slice(0, n)).length; esc > limit && n > 0; esc = JSON.stringify(text.slice(0, n)).length) n = Math.max(0, Math.floor((n * limit) / esc) - 16);
+  const plain = `${text.slice(0, n)} …[${text.length - n} characters cut]`;
+  return { value: plain, keptChars: JSON.stringify(plain).length, itemsKept: 0 };
 }
 
 /** The note a cut answer carries, so the caller knows it is partial and where the whole answer is (the platform's wording). */
@@ -52,7 +57,7 @@ export function truncationNote(originalChars: number, cut: CutAnswer, fullPath: 
     original_chars: originalChars,
     kept_chars: cut.keptChars,
     ...(fullPath ? { full_result_path: fullPath } : { full_result_missing: 'the whole answer could not be written to a file' }),
-    note: `This answer was ${Math.round(originalChars / 1024)} KB — too large to read in one turn, so lists were cut to their first ${cut.itemsKept || 'few'} items and long text clipped.`
+    note: `This answer was ${Math.round(originalChars / 1024)} KB — too large to read in one turn, so ${cut.itemsKept ? `lists were cut to their first ${cut.itemsKept} items and long text clipped` : 'it was cut to its first part'}.`
       + (fullPath ? ` The whole answer is saved at ${fullPath}: read the file for the rest${ask}.`
         : ` The whole answer could NOT be saved, so the cut part is not available anywhere: do not treat this as the whole answer${ask || ' — ask the tool for less'}.`),
   };

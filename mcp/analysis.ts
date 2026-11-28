@@ -209,7 +209,7 @@ export async function runAnalysis(name: string, a: Record<string, any>, s: Sessi
       if (a.profile != null && !DCMA_PROFILES[a.profile]) fail('bad_input', `Unknown profile "${a.profile}".`, `Profiles: ${Object.keys(DCMA_PROFILES).join(', ')}.`);
       if (a.baseline != null && !projIds.some((id) => baselineOf(s.db, s.db.tables.PROJECT.rows.find((p) => p.proj_id === id)!, String(a.baseline)))) fail('bad_input', `No baseline "${a.baseline}" for this project.`, `Use project, bl1, bl2, bl3 or a saved baseline's name: ${savedBaselines(s.db, projIds).join(', ') || 'none saved'}.`);
       const limit = a.limit_days === 'dynamic' ? 'dynamic' : numArg(a.limit_days, 'limit_days', { min: 0, hint: 'Pass limit_days as a number of working days, or "dynamic", or leave it out for 44.' });
-      return checked(dcma14(s.db, { projIds, hoursPerDay: s.hpd, profile: a.profile, thresholds: a.thresholds, baseline: a.baseline, statusDate: h.dd(a.status_date), targetFinish: h.dd(a.target_finish), cptSlipDays: a.cpt_slip_days != null ? Number(a.cpt_slip_days) : undefined, cptActivity: a.cpt_activity, limitDays: limit, exempt: a.exempt, maxIds: 0 }), CHECK_COLUMNS, 'failing_activities');
+      return checked(dcma14(s.db, { projIds, hoursPerDay: s.hpd, profile: a.profile, thresholds: a.thresholds, baseline: a.baseline, statusDate: h.dd(a.status_date), targetFinish: h.dd(a.target_finish), cptSlipDays: numArg(a.cpt_slip_days, 'cpt_slip_days', { above: 0, hint: 'Pass cpt_slip_days as a number of working days above 0, or leave it out for 600.' }), cptActivity: a.cpt_activity, limitDays: limit, exempt: a.exempt, maxIds: 0 }), CHECK_COLUMNS, 'failing_activities');
     }
     case 'float_paths': {
       const method = a.method == null ? 'free_float' : String(a.method);

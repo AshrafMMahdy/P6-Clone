@@ -59,7 +59,13 @@ export function ScheduleOptionsDialog() {
   const p = rows(db, 'PROJECT').find((x) => x.proj_id === ui.openProjects[0])!;
   const [o, setO] = useState<SchedOptions>(() => optionsFor(db, p));
   const set = (patch: Partial<SchedOptions>) => setO({ ...o, ...patch });
+  // the number of paths keeps what is typed (a cleared box while retyping is not refused); OK checks it and refuses a wrong value in words
+  const [countText, setCountText] = useState(String(o.floatPaths.count));
+  const countOk = (t: string) => { const n = Number(t); return t.trim() !== '' && Number.isInteger(n) && n >= 1 ? n : null; };
   const save = () => {
+    const count = countOk(countText);
+    if (o.floatPaths.enabled && count == null) return toast('The number of paths must be a whole number of 1 or more.');
+    const floatPaths = { ...o.floatPaths, count: count ?? o.floatPaths.count };
     mutate('Schedule Options', (d) => {
       for (const pid of ui.openProjects) {
         const S = table(d, 'SCHEDOPTIONS');
@@ -76,7 +82,7 @@ export function ScheduleOptionsDialog() {
         const pr = d.tables.PROJECT.rows.find((x) => x.proj_id === pid)!;
         pr.critical_path_type = o.criticalBy === 'longestPath' ? 'CT_DrivPath' : 'CT_TotFloat';
         pr.critical_drtn_hr_cnt = String(o.criticalFloatHrs);
-        writeScheduleOptions(d, pr, { floatPaths: o.floatPaths });
+        writeScheduleOptions(d, pr, { floatPaths });
       }
     });
     closeDialog();
@@ -114,7 +120,7 @@ export function ScheduleOptionsDialog() {
               {rows(db, 'TASK').filter((t) => ui.openProjects.includes(t.proj_id) && t.task_type !== 'TT_WBS').map((t) => <option key={t.task_id} value={t.task_code}>{t.task_code} {t.task_name}</option>)}
             </select>
             <label>Number of paths to calculate</label>
-            <input type="number" min={1} disabled={!o.floatPaths.enabled} style={{ width: 70 }} value={o.floatPaths.count} onChange={(e) => { const n = Number(e.target.value); if (Number.isInteger(n) && n >= 1) set({ floatPaths: { ...o.floatPaths, count: n } }); else toast('The number of paths must be a whole number of 1 or more.'); }} />
+            <input type="number" min={1} disabled={!o.floatPaths.enabled} style={{ width: 70 }} value={countText} onChange={(e) => setCountText(e.target.value)} />{o.floatPaths.enabled && countOk(countText) == null && <span style={{ color: '#b00020' }}> a whole number of 1 or more</span>}
           </div>
         </div>
       </fieldset>

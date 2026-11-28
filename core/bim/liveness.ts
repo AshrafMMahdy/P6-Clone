@@ -13,6 +13,7 @@
 // parent judges (heartbeatWatcher). The browser and other programs we drive are watched from here (unitWatch: ticks we see, the
 // processor time of the program's process tree; externalWatch: an external program's output and processor time). stuckMessage()
 // is the one text for an ended job: which step, how long without progress, what was tried, the alternatives.
+import { envNumber } from '../env.ts';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { execFile, type ChildProcess } from 'node:child_process';
 import { readdirSync, readFileSync } from 'node:fs';
@@ -119,7 +120,7 @@ export const childV8Flags = (): string[] => (!process.versions.electron && Numbe
 // ---- the rule (the platform's, craftSupervisor.ts livenessVerdict) ---------------------------------------------------
 /** The window of the check (the platform's: 5 s). P6CLONE_LIVENESS_WINDOW_MS (the environment only: tests) shortens it. */
 // AGREED LIMIT (owner, 2026-11-28): 5 s window, 10 ms of CPU = busy, 2 idle / 3 unread windows = frozen, heartbeat 5 s — the one rule that ends a child (Java, IFC workers, Chromium) that has stopped — why: item 26 rule 5, "Timers, memory, and safety - agreed" — necessary because a stopped child must be ended; the numbers arbitrary by agreement.
-export const livenessWindowMs = () => Number(process.env.P6CLONE_LIVENESS_WINDOW_MS) || 5_000;
+export const livenessWindowMs = () => envNumber('P6CLONE_LIVENESS_WINDOW_MS', 5_000);
 /** Processor time in a window that means the work is running (the platform's 10 ms). */
 export const BUSY_CPU_MS = 10;
 /** Windows in a row with no progress and no processor time that make the work frozen (the platform's: the second; a process starved on a
@@ -282,7 +283,7 @@ export function heartbeatWatcher(child: ChildProcess, o: { onStuck: (i: StuckInf
 }
 /** The environment that makes a worker send heartbeats (every P6CLONE_HEARTBEAT_MS, 5000), with this machine's speed factor
  *  (the start-up benchmark, once) and the job's own measured rates (its estimates). */
-export const heartbeatEnv = (): Record<string, string> => ({ P6CLONE_HEARTBEAT_MS: String(Number(process.env.P6CLONE_HEARTBEAT_MS) || 5000), ...rateEnv() });
+export const heartbeatEnv = (): Record<string, string> => ({ P6CLONE_HEARTBEAT_MS: String(envNumber('P6CLONE_HEARTBEAT_MS', 5000)), ...rateEnv() });
 
 /** A watch on work whose ticks we see from here (frames drawn, tiles loaded, ffmpeg's frames, a compute worker's rows). A tick counts
  *  only when done ADVANCED (the same count again is no progress); a new step is progress. cpu: the work's processor time so far (the

@@ -27,6 +27,10 @@ const STATUS: Record<string, string> = { TK_NotStart: 'not started', TK_Active: 
 const RSRC_TYPE: Record<string, string> = { RT_Labor: 'labor', RT_Equip: 'nonlabor', RT_Mat: 'material' };
 const TYPE: Record<string, string> = { TT_Task: 'task', TT_Rsrc: 'resource dependent', TT_Mile: 'start milestone', TT_FinMile: 'finish milestone', TT_LOE: 'level of effort', TT_WBS: 'WBS summary' };
 
+/** An export inside this server asks a lookup for EVERY item (schedule_health's examples, earned_value's activities): a key no caller
+ *  can send, so an argument an outside agent passes is never one that changes what is listed (item 26, the list rule). */
+export const WHOLE = Symbol('every item, for an export');
+
 export const TOOLS: ToolDef[] = [
   { name: 'project_summary', description: 'Overview of the open project(s): names, data date, start/finish, activity counts by status, critical and negative-float counts, WBS top level, calendars and resources. Call this first. Days in every answer of this server are working days of each activity\u2019s own calendar (its hours per day; lags: the relationship-lag calendar).', parameters: { type: 'object', properties: {} } },
   { name: 'find_activities', description: 'Search activities. All filters are optional and combined. Returns up to `limit` rows (ID, name, status, start, finish, durations in days, total float in days, WBS; source_uid = the Microsoft Project task UID for activities read from an MSPDI/MPX file).', parameters: { type: 'object', properties: {
@@ -68,7 +72,7 @@ const d = (s?: string) => (s ? s.slice(0, 16) : '');
 const days = (h: string | number | undefined, hpd: number) => (h === '' || h == null ? null : Math.round((Number(h) / hpd) * 10) / 10);
 
 /** calendarDays: days on each activity's own calendar, as applyOps takes them with the same option (MCP, CLI) */
-export function runTool(name: string, args: Record<string, any>, db: Db, ctx: Ctx<unknown>, projIds: string[], hpd: number, calendarDays = false): unknown {
+export function runTool(name: string, args: Record<string | symbol, any>, db: Db, ctx: Ctx<unknown>, projIds: string[], hpd: number, calendarDays = false): unknown {
   // the counts a lookup takes are whole numbers (item 26: wrong input refused in words, never floored, clamped or read as "all")
   for (const [k, least] of [['offset', 0], ['limit', 1], ['depth', 1], ['predecessors', 0], ['successors', 0], ['max_per_level', 1]] as const) {
     const v = args[k];
@@ -289,7 +293,7 @@ export function runTool(name: string, args: Record<string, any>, db: Db, ctx: Ct
     case 'schedule_health': {
       const live = tasks.filter((t) => !t.act_end_date && t.task_type !== 'TT_WBS' && t.task_type !== 'TT_LOE');
       const P = logicRelationships(db).filter((r) => open.has(r.proj_id));
-      const ex = (l: Row[]) => ({ count: l.length, examples: (args.every_example === true || l.length <= LISTED ? l : l.slice(0, LISTED)).map((t) => `${t.task_code} ${t.task_name}`), ...(args.every_example !== true && l.length > LISTED ? { examples_total: l.length } : {}) }); // (every_example: the result file's whole lists)
+      const ex = (l: Row[]) => ({ count: l.length, examples: (args[WHOLE] === true || l.length <= LISTED ? l : l.slice(0, LISTED)).map((t) => `${t.task_code} ${t.task_name}`), ...(args[WHOLE] !== true && l.length > LISTED ? { examples_total: l.length } : {}) }); // (WHOLE: the export file's whole lists)
       // each project is judged against its own data date (as the scheduler does)
       const ddOf = (t: Row) => parseP6Date(ctx.proj.get(t.proj_id)?.last_recalc_date);
       const noPred = live.filter((t) => !(ctx.predsOf.get(t.task_id)?.length));
@@ -352,15 +356,15 @@ export function runTool(name: string, args: Record<string, any>, db: Db, ctx: Ct
         };
       });
       const scored = tasks.map((t) => ({ t, e: earnedValue(costs.get(t.task_id)!) })).filter((x) => x.e.bac > 0 && (x.e.ac > 0 || x.e.pv > 0));
-      const n = args.worst === 0 ? undefined : LISTED; // (worst 0: the export's every activity, inside this server only)
+      const n = args[WHOLE] === true ? undefined : LISTED; // (the export: every activity)
       const byCpi = scored.filter((x) => x.e.ac > 0).sort((a, b) => a.e.cpi - b.e.cpi), bySpi = scored.filter((x) => x.e.pv > 0).sort((a, b) => a.e.spi - b.e.spi);
       return {
         projects,
-        // the lists cut to `worst` say how many there are
+        // the lists cut to 25 say how many there are
         worst_cost_performance: byCpi.slice(0, n).map((x) => ({ id: x.t.task_code, name: x.t.task_name, cpi: round(x.e.cpi), cv: round(x.e.cv) })), worst_cost_performance_total: byCpi.length,
         worst_schedule_performance: bySpi.slice(0, n).map((x) => ({ id: x.t.task_code, name: x.t.task_name, spi: round(x.e.spi), sv: round(x.e.sv) })), worst_schedule_performance_total: bySpi.length,
-        // (every_activity, an export: each activity with cost, every earned value figure of it)
-        ...(args.every_activity === true ? { activities: tasks.filter((t) => t.task_type !== 'TT_WBS' && costs.get(t.task_id)).map((t) => ({ project: ctx.proj.get(t.proj_id)?.proj_short_name, id: t.task_code, name: t.task_name, wbs: wbsPath(t.wbs_id), ...pack(sumLines([costs.get(t.task_id)!])) })) } : {}),
+        // (the export: each activity with cost, every earned value figure of it)
+        ...(args[WHOLE] === true ? { activities: tasks.filter((t) => t.task_type !== 'TT_WBS' && costs.get(t.task_id)).map((t) => ({ project: ctx.proj.get(t.proj_id)?.proj_short_name, id: t.task_code, name: t.task_name, wbs: wbsPath(t.wbs_id), ...pack(sumLines([costs.get(t.task_id)!])) })) } : {}),
         ...(() => { const pRows = [...open].map((pid) => ctx.proj.get(pid)!).filter(Boolean); const differ = differentDatesNote(Object.fromEntries(pRows.map((p) => [p.proj_short_name, parseP6Date(p.last_recalc_date) != null ? p.last_recalc_date : null])), 'each project\u2019s own date'); const n = tidyNotes([...dataDateAssumedNotes(pRows), ...dataDateGaps(pRows, 'planned value and earned value at the data date', null), ...(differ ? [differ] : []), ...(() => { const none = projects.filter((p) => p.totals.bac === 0).map((p) => p.project ?? ''); return none.length ? [notAssessed('SPI, CPI and EAC', `${projectsText(none)} ${none.length === 1 ? 'carries' : 'carry'} no costs`)] : []; })(), ...currentPlanNotes(db, pRows.filter((p) => !assignedBaselineId(db, p)))]); return n.length ? { notes: n } : {}; })(),
       };
     }

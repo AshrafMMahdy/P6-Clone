@@ -3,6 +3,7 @@
 // of its own, and the clone reads that XML as it reads any (mspdi.ts): every element of every task, resource,
 // assignment and calendar, as the file has it. Java: P6CLONE_JAVA, else the runtime shipped in mpxj/jre/<os>-<arch>/,
 // else the machine's own. MPXJ reads .mpp; it does not write it (save as Microsoft Project XML, which Project opens).
+import { envNumber } from '../env.ts';
 import { spawn } from 'node:child_process';
 import { closeSync, copyFileSync, existsSync, mkdtempSync, openSync, readSync, rmSync, statSync } from 'node:fs';
 import { StringDecoder } from 'node:string_decoder';
@@ -41,7 +42,7 @@ export class MppReaderMissing extends Error {}
 
 /** A text file read in pieces of about `pieceBytes` (never one string: a document can be larger than the longest string, about 512 MB). A BOM is dropped. */
 // AGREED LIMIT (owner, 2026-11-28): 32 MB — the converted XML is read in pieces of this size — why: item 26 rule 5, "Timers, memory, and safety - agreed" — arbitrary by agreement (memory).
-export function readChunked(path: string, pieceBytes = Number(process.env.P6CLONE_XML_CHUNK_BYTES) || 32 * 1048576): Chunked {
+export function readChunked(path: string, pieceBytes = envNumber('P6CLONE_XML_CHUNK_BYTES', 32 * 1048576, { whole: true })): Chunked {
   const out = new Chunked(), fd = openSync(path, 'r'), dec = new StringDecoder('utf8'), buf = Buffer.alloc(Math.max(1024, pieceBytes));
   try {
     let first = true;

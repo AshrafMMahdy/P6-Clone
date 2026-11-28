@@ -114,6 +114,9 @@ test('Time impact analysis: with two projects open the screen’s fragnet names 
   const ops = tiaFragnetOps(acts, rels, cpm.proj_short_name);
   assert.equal(ops.length, 3, 'the row with no predecessor is not sent');
   assert.ok(ops.every((o) => o.project === 'P'), 'every operation names the open project');
+  // a box that does not hold a number is refused, naming the row (never read as 0)
+  assert.throws(() => tiaFragnetOps([{ id: 'TIA-01', name: '', days: 'ten' }], [], 'P'), { message: 'The days of TIA-01 must be a number of days (got "ten").' });
+  assert.throws(() => tiaFragnetOps(acts, [{ pred: 'A', succ: 'TIA-01', type: 'FS', lag: '' }], 'P'), { message: 'The lag of A → TIA-01 must be a number of days (got nothing).' });
   const screen = timeImpact(db, [cpm.proj_id], ops, { hoursPerDay: HPD });
   assert.ok(screen.ok, JSON.stringify(screen).slice(0, 300));
   // the tool, given the same arguments (what Export writes), answers the same

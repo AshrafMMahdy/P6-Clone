@@ -315,7 +315,7 @@ async function main(): Promise<number> {
       const n = (k: string) => (opt(k) != null ? Number(opt(k)) : undefined);
       const qargs: Record<string, unknown> = what === 'projects' ? { text: positional[2] ?? opt('text') }
         : what === 'trace' ? { activity_id: positional[2], predecessors: n('preds'), successors: n('succs'), driving_only: flag('driving') || undefined }
-        : what === 'ev' ? { worst: n('limit') }
+        : what === 'ev' ? (opt('limit') != null ? (() => { throw new Error('--limit is not an option of query ev: the answer lists the 25 weakest activities of each kind and says how many there are.'); })() : {})
         : what === 'activity' ? { activity_id: positional[2] }
         : what === 'resources' ? { resource: positional[2] ?? opt('resource'), limit: n('limit') }
         : what === 'wbs' ? { under: positional[2] ?? opt('under'), depth: n('depth') }

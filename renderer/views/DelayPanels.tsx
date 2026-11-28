@@ -97,7 +97,8 @@ export function TiaPanel() {
   // the engine called with the tool's arguments (those Export gives) as the tia tool calls it, so the screen is what the Export writes
   const run = () => {
     if (!cur) return;
-    const a = fragnet();
+    let a: ReturnType<typeof fragnet>;
+    try { a = fragnet(); } catch (e) { return toast((e as Error).message); }
     const b = a.baseline ? baselineOf(getDb(), cur, a.baseline as 'project') : null;
     if (a.baseline && !b) return toast(`The project has no ${a.baseline} baseline.`);
     const d = a.data_date ? parseP6Date(a.data_date) : undefined;

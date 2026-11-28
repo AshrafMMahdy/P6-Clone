@@ -27,7 +27,6 @@ copyFileSync(join(made, 'Data', 'Settings', 'ai-assistant.json'), join(old, 'ai-
 if (existsSync(join(made, 'Local State'))) copyFileSync(join(made, 'Local State'), join(old, 'Local State'));   // unlocks the encrypted key
 mkdirSync(join(old, 'whiq', 'logs'), { recursive: true }); writeFileSync(join(old, 'whiq', 'logs', 'agent.log'), 'old log\n');
 mkdirSync(join(old, 'whiq', 'runtime'), { recursive: true }); writeFileSync(join(old, 'whiq', 'runtime', 'memory.json'), '{"version":1,"items":[]}');
-mkdirSync(join(old, 'ai-chats'), { recursive: true }); writeFileSync(join(old, 'ai-chats', 'x.jsonl'), '{}\n');
 
 app = await launch(old);
 win = await app.firstWindow();
@@ -37,7 +36,6 @@ ok(existsSync(join(data, 'Database', 'p6clone-db.json')) && existsSync(join(old,
 ok(existsSync(join(data, 'Settings', 'ai-assistant.json')) && existsSync(join(old, 'ai-assistant.json.moved')), 'the AI settings moved to Data\\Settings');
 ok(existsSync(join(data, 'Logs', 'agent.log')), 'the agent\'s logs moved to Data\\Logs');
 ok(existsSync(join(data, 'Agent', 'runtime', 'memory.json')) && !existsSync(join(data, 'Agent', 'logs')), 'the agent\'s files moved to Data\\Agent (its logs not twice)');
-ok(existsSync(join(data, 'Agent', 'panel-chats', 'x.jsonl')), 'the panel\'s own chats moved to Data\\Agent\\panel-chats');
 await win.waitForTimeout(3000);
 ok(/CFC Modified/.test(await win.locator('body').innerText()), 'its projects are there (CFC Modified)');
 const models = await win.evaluate(() => (window as any).p6.aiGetModels());

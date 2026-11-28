@@ -139,7 +139,7 @@ export async function runLob(name: string, a: Record<string, any>, s: Session, h
     }
     case 'lob_view': {
       const { projId, model, from, problems } = lobOf(a.project);
-      // worked out whole: the answer lists `limit` of each list (default 200; the _totals say how many there are), the export all
+      // worked out whole: the answer lists `limit` of each list when asked (every item otherwise; the _totals say how many there are), the export all
       const full = view(projId, model, Infinity);
       const v = { project: full.project, ...cutLobView(full, countArg(a.limit, 'limit', { min: 1 }) ?? Infinity) };
       const outside = reconcile(s.db, projId, model, { hoursPerDay: s.hpd });

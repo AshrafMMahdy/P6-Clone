@@ -9,6 +9,7 @@
 // reserves the copy. What does not move, and why: opening and saving files (they CREATE or serialise the session's database: the main
 // thread would pay the copy of the whole result), editing (finite, fast operations on the database itself), and the 4D tools, which work on
 // models held in the main process (their heavy parts already run in worker processes: geometry, index, readers).
+import { envNumber } from '../core/env.ts';
 import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads';
 import { cpus } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -49,7 +50,9 @@ function entry(): string {
   return join(dirname(fileURLToPath(import.meta.url)), 'server.ts');
 }
 // AGREED LIMIT (owner, 2026-11-28): the CPU count less one, at least 2 — compute workers at once; past them a call waits its turn — why: item 26 rule 5, "Timers, memory, and safety - agreed" — necessary because each worker holds a copy of the project.
-const maxWorkers = () => Math.max(2, Number(process.env.P6CLONE_COMPUTE_WORKERS) || Math.max(2, cpus().length - 1));
+//   (P6CLONE_COMPUTE_WORKERS sets the number instead, as given; 0 runs every call in the server's own thread; anything else is refused in words)
+export const computeWorkers = () => envNumber('P6CLONE_COMPUTE_WORKERS', Math.max(2, cpus().length - 1), { zero: true, whole: true });
+const maxWorkers = computeWorkers;
 const idle: { w: Worker; timer: NodeJS.Timeout }[] = [];
 let active = 0;
 const waiting: (() => void)[] = [];
@@ -285,7 +288,7 @@ export function reasonerState(inProcess: () => Promise<ReasonerState>, modelPath
     reasonerAsked = true;
     const done = (r: ReasonerState) => { reasonerKnown = r; };
     const here = () => { void inProcess().then(done, (e) => done({ loaded: false, model: modelPath(), error: (e as Error).message })); };
-    if (process.env.P6CLONE_COMPUTE_WORKERS === '0') here();
+    if (computeWorkers() === 0) here();
     else {
       try {
         const w = new Worker(entry(), { workerData: { p6Reasoner: true } });

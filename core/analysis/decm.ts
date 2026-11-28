@@ -25,9 +25,10 @@ export const DECM_IDS: DecmId[] = ['06A204b', '06A205a', '06A208a', '06A209a', '
  *  workbook (dcma.mil/HQ/EVMS) refuses automated reading. Each check's threshold.source names it. */
 const THRESHOLDS: Record<DecmId, number | null> = { '06A204b': 0, '06A205a': 10, '06A208a': 0, '06A209a': 0, '06A210a': 0, '06A212a': 1, '06A401a': null, '06A501a': 5, '06A504a': 10, '06A504b': 10, '06A505a': 5, '06A505b': 5, '06A506a': 5, '06A506b': 0, '06A506c': 1 };
 export const DECM_THRESHOLD_SOURCE = 'DCMA DECM published threshold';
-/** 06A506c: DCMA's window for a forecast start riding the status date (three working days, which DCMA gives as five calendar days: the calendar days are used, the same on every
- *  calendar) and for a remaining duration riding it (within two days of its value at the update before). */
-const RIDE_START_DAYS = 5, RIDE_REMAINING_DAYS = 2;
+// AGREED LIMIT (owner, 2026-11-28): 5 calendar days — 06A506c: a forecast start this close after each update's status date rides it (DCMA's three working days, given as five calendar days: the same on every calendar) — why: rule 7 of item 26, "analysis thresholds - agreed as long as it is visible" (the check's detail.rides_when says it) — necessary because it is DCMA's published window (Steelray's 06A506c page).
+const RIDE_START_DAYS = 5;
+// AGREED LIMIT (owner, 2026-11-28): 2 days — 06A506c: a remaining duration within this of its value at the update before rides the status date (days of the activity's own calendar) — why: rule 7 of item 26, "analysis thresholds - agreed as long as it is visible" (the check's detail.rides_when says it) — necessary because it is DCMA's published window (Steelray's 06A506c page).
+const RIDE_REMAINING_DAYS = 2;
 /** The check names. dcmaDecm.ts:60-68. */
 const NAMES: Record<DecmId, string> = {
   '06A204b': 'Dangling starts/finishes', '06A205a': 'Lags', '06A208a': 'Summary tasks with logic', '06A209a': 'Hard constraints', '06A210a': 'LOE with discrete successors', '06A212a': 'Out-of-sequence progress',
@@ -69,12 +70,12 @@ export function decm(db: Db, o: DecmOptions = {}): DecmReport {
   const add = (c: CheckResult) => out.push(c);
   const na = (id: DecmId, reason: string) => add(reason.startsWith('Not assessed: ') ? { ...notAssessed(id, NAMES[id], '%', th(id), ''), note: reason } : notAssessed(id, NAMES[id], '%', th(id), reason));
   /** a percentage check: found of a population; an empty population is not assessed */
-  const percent = (id: DecmId, found: Offender[], denominator: number, emptyNote: string) => {
+  const percent = (id: DecmId, found: Offender[], denominator: number, emptyNote: string, detail?: Record<string, unknown>) => {
     const t = th(id)!;
     if (!denominator) return na(id, emptyNote);
     // judged on the exact share, shown to two decimals: a threshold of 0 % is failed by one activity in any population (dcma_14 judges the same way now, common.ts percentCheck)
     const metric = Math.round((10000 * found.length) / denominator) / 100;
-    add({ id, name: NAMES[id], unit: '%', metric, threshold: t, numerator: found.length, denominator, result: passes((100 * found.length) / denominator, t) ? 'pass' : 'fail', activities: found, total_activities: found.length });
+    add({ id, name: NAMES[id], unit: '%', metric, threshold: t, numerator: found.length, denominator, result: passes((100 * found.length) / denominator, t) ? 'pass' : 'fail', activities: found, total_activities: found.length, ...(detail ? { detail } : {}) });
   };
 
   // dcma_14's own checks, one by one with every activity listed (not the whole of dcma_14): its populations, logic, lag and hard-constraint checks, and below its critical path test and invalid dates rule
@@ -162,7 +163,7 @@ export function decm(db: Db, o: DecmOptions = {}): DecmReport {
     if (!s.projs.some((p) => (s.dataDate(p.proj_id) ?? -Infinity) > ddPrev)) return na('06A506c', `${prev.name}, the update before this one, has the same status date or a later one; nothing can have ridden it`);
     const open = pop.filter((t) => !t.act_end_date && !isLoe(t));
     const before = new Map([...matchActivities(rows(updateView(prev), 'TASK').filter((t) => !isWbs(t)), open)].map(([a, b]) => [b, a]));
-    const days = (min: number) => `${Math.round((min / MIN_PER_DAY) * 10) / 10} d`, hrs = (t: Row) => Number(t.remain_drtn_hr_cnt || 0);
+    const days = (min: number) => `${Math.round((min / MIN_PER_DAY) * 10) / 10} d`, hrs = (t: Row) => Number(t.remain_drtn_hr_cnt || 0), inDays = (h: number, t: Row) => Math.round((h / s.dh.task(t)) * 10) / 10;
     const pop2 = open.filter((t) => before.has(t)), hit: Offender[] = [];
     for (const t of pop2) {
       const p = before.get(t)!, dd = s.dataDate(t.proj_id)!;
@@ -171,11 +172,14 @@ export function decm(db: Db, o: DecmOptions = {}): DecmReport {
         const fS = parseP6Date(t.restart_date || t.early_start_date), pS = parseP6Date(p.restart_date || p.early_start_date);
         const near = (f: number | null, d: number) => f != null && f >= d && f - d <= RIDE_START_DAYS * MIN_PER_DAY;
         if (near(fS, dd) && near(pS, ddPrev)) hit.push(offender(t, s, `forecast start ${days(pS! - ddPrev)} after the status date at ${prev.name}, ${days(fS! - dd)} after it now`));
-      } else if (t.act_start_date && p.act_start_date && Math.abs(hrs(t) - hrs(p)) <= RIDE_REMAINING_DAYS * s.hpd) {
-        hit.push(offender(t, s, `remaining duration ${Math.round((hrs(p) / s.hpd) * 10) / 10} d at ${prev.name}, ${Math.round((hrs(t) / s.hpd) * 10) / 10} d now`));
+      } else if (t.act_start_date && p.act_start_date && Math.abs(hrs(t) - hrs(p)) <= RIDE_REMAINING_DAYS * s.dh.task(t)) {
+        // (days of the activity's own calendar, at both updates: the same activity)
+        hit.push(offender(t, s, `remaining duration ${inDays(hrs(p), t)} d at ${prev.name}, ${inDays(hrs(t), t)} d now`));
       }
     }
-    percent('06A506c', hit, pop2.length, `no incomplete activity is also in ${prev.name}`);
+    percent('06A506c', hit, pop2.length, `no incomplete activity is also in ${prev.name}`, {
+      rides_when: `not started at both updates with its forecast start within ${RIDE_START_DAYS} calendar days after each update's status date, or under way at both with its remaining duration within ${RIDE_REMAINING_DAYS} days (of its own calendar) of its value at ${prev.name}`,
+    });
   }
 
   const order = (c: DecmCheck) => DECM_IDS.indexOf(c.id as DecmId);

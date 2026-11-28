@@ -144,7 +144,6 @@ export function FloatPathsPanel() {
           </div>}
           <div style={{ marginTop: 8 }}><b>Near critical</b> ({res.near_critical.length})</div>
           <table className="tbl"><thead><tr><th>Activity</th><th>Name</th><th>Total float (d)</th></tr></thead><tbody>{res.near_critical.map((x) => <tr key={x.id}><td><Id id={x.id} /></td><td>{x.name}</td><td style={{ textAlign: 'right' }}>{x.total_float_days}</td></tr>)}</tbody></table>
-          {res.near_critical.length > 200 && <div className="muted">{res.near_critical.length - 200} more: Export… lists all.</div>}
         </div>
       )}
     </div>
@@ -338,7 +337,6 @@ export function LevelPanel() {
             <tbody>{res.peaks.map((p) => <tr key={p.resource}><td>{p.resource}</td><td style={{ textAlign: 'right' }}>{n1(p.peak)}</td><td style={{ textAlign: 'right' }}>{n1(p.limit)}</td><td>{date(p.day)}</td><td>{p.overallocated ? 'yes' : ''}</td></tr>)}</tbody></table>
           <table className="tbl" style={{ marginTop: 8 }}><thead><tr><th>Activity</th><th>Early start before</th><th>Start after</th><th>Finish after</th></tr></thead>
             <tbody>{res.moved.map((m) => <tr key={m.id}><td><Id id={m.id} /></td><td>{m.from.slice(0, 16)}</td><td>{m.start.slice(0, 16)}</td><td>{m.finish.slice(0, 16)}</td></tr>)}</tbody></table>
-          {res.moved.length > 500 && <div className="muted">{res.moved.length - 500} more: Export… lists all.</div>}
         </div>
       )}
     </div>
@@ -463,7 +461,6 @@ export function ComparePanel() {
         {res.mode === 'computed' && res.no_longer.length > 0 && <div>No longer critical: <Ids ids={res.no_longer} /></div>}
         <table className="tbl" style={{ marginTop: 4 }}><thead><tr>{cols.map((c) => <th key={c}>{c.replace(/_/g, ' ')}</th>)}</tr></thead>
           <tbody>{res.changes.map((c, i) => <tr key={i}>{cols.map((k) => <td key={k}>{c[k] == null ? '' : String(c[k])}</td>)}</tr>)}</tbody></table>
-        {res.changes.length > 500 && <div className="muted">{res.changes.length - 500} more: Export… lists all.</div>}
       </div>}
     </div>
   );
@@ -475,7 +472,7 @@ export function ReviewPanel() {
   const ui = useStore((s) => s.ui);
   const [res, setRes] = useState<Review | null>(null);
   const [open, setOpen] = useState<string | null>(null);
-  // as the tool works it: every project of the database, days of each activity's own calendar, 10 examples a check
+  // as the tool works it: every project of the database, days of each activity's own calendar, 25 examples a check (the list rule)
   const run = () => { const r = reviewSchedule(getDb(), { hoursPerDay: ui.prefs.hoursPerDay, calendarDays: true }); setRes(r); setOpen(r.checks.find((c) => c.grade === 'fail')?.id ?? null); };
   return (
     <div style={box}>

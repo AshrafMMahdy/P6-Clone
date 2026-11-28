@@ -235,8 +235,8 @@ export async function runLive(name: string, args: Record<string, any>, givenUp: 
       case 'open_report': {
         const ui0 = getUi();
         if (!ui0.openProjects.length) return { error: 'Open a project first.' };
-        // weeks: a whole number from 1 to 26 when given (refused otherwise, not turned into 3)
-        if (args.weeks != null && !(Number.isInteger(args.weeks) && args.weeks >= 1 && args.weeks <= 26)) return { error: `weeks must be a whole number from 1 to 26 (got ${JSON.stringify(args.weeks)}).` };
+        // weeks: a whole number of 1 or more when given (refused otherwise, not turned into 3), as run_report takes it
+        if (args.weeks != null && !(Number.isSafeInteger(args.weeks) && args.weeks >= 1)) return { error: `weeks must be a whole number of 1 or more (got ${JSON.stringify(args.weeks)}).` };
         const { entry, report } = runReport(getDb(), ui0.openProjects, String(args.report ?? ''), { prefs: ui0.prefs, weeks: args.weeks });
         setUi({ view: 'reports' });
         await sleep(400);

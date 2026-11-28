@@ -184,11 +184,15 @@ export function AssignRoleDialog() {
 export function PreferencesDialog() {
   const prefs = useStore((s) => s.ui.prefs);
   const [p, setP] = useState<Prefs>(prefs);
+  // the box keeps what is typed (a cleared box while retyping is not refused); OK checks it and refuses a wrong value in words
+  const [hpdText, setHpdText] = useState(String(prefs.hoursPerDay));
+  const hpdOk = (t: string) => { const n = Number(t); return t.trim() !== '' && Number.isFinite(n) && n > 0 && n <= 24 ? n : null; };
+  const ok = () => { const h = hpdOk(hpdText); if (h == null) return toast('Hours per day must be a number above 0 and at most 24.'); setUi({ prefs: { ...p, hoursPerDay: h } }); closeDialog(); };
   return (
-    <Dialog title="User Preferences" width={460} buttons={<><button className="btn primary" onClick={() => { setUi({ prefs: p }); closeDialog(); }}>OK</button><button className="btn" onClick={closeDialog}>Cancel</button></>}>
+    <Dialog title="User Preferences" width={460} buttons={<><button className="btn primary" onClick={ok}>OK</button><button className="btn" onClick={closeDialog}>Cancel</button></>}>
       <fieldset><legend>Time Units</legend>
         <div className="form" style={{ gridTemplateColumns: 'auto 1fr' }}>
-          <label>Hours per day (duration display)</label><input type="number" value={p.hoursPerDay} onChange={(e) => { const n = Number(e.target.value); if (e.target.value.trim() && n > 0 && n <= 24) setP({ ...p, hoursPerDay: n }); else toast('Hours per day must be a number above 0 and at most 24.'); }} />
+          <label>Hours per day (duration display)</label><span><input type="number" value={hpdText} onChange={(e) => setHpdText(e.target.value)} />{hpdOk(hpdText) == null && <span style={{ color: '#b00020' }}> a number above 0 and at most 24</span>}</span>
           <label>Decimals</label><select value={p.durationDecimals} onChange={(e) => setP({ ...p, durationDecimals: Number(e.target.value) })}><option value={0}>0</option><option value={1}>1</option><option value={2}>2</option></select>
         </div>
       </fieldset>

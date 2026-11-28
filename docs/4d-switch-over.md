@@ -16,8 +16,8 @@ The draft replacement skill is in [platform/4d-scheduling-skill.md](platform/4d-
   only the handle, and each is one undoable change.
 - The platform supervisor stops a call after 300 s (`WHIQ_ENGINE_CALL_TIMEOUT_S`). Pass `async: true` (then
   `job_status`) for `open_model` on a large model and for `render_4d` video.
-- Answers longer than 400,000 characters come back as `{truncated: true, preview}`. Page `list_elements` at 1,000 or
-  fewer (a 2,000-element page of Schependomlaan is 448,323 characters).
+- An answer longer than 131,072 characters (the platform's rule) is cut by structure and saved whole to a file that
+  `result_truncated` names. Ask `list_elements` for a part (`offset` / `limit`) to read a large model in turns.
 
 ### `whiq/files`
 
@@ -53,7 +53,7 @@ The platform has 9 custom 4D tool slots (10 names: `model_history` and `ifc_diff
 | `export_4d_synchro {same as above}` | `set_4d_keys`, then `export_4d {handle, target: synchro, path}` | The schedule is **P6 XML** (`<project>.xml`) carrying the "4D Key" field, not an XER. For an XER, `save {path: "x.xer"}` (the field travels in it). Auto-Matching uses the 4D Key field rather than the task ID. |
 | native IFC 4D (skill step 8: `run_code` + ifcopenshell) | `export_4d {handle, target: ifc4d, path, baselines[]}` | One call; no sandbox. IFC4 models only: an IFC2X3 model is refused (`bad_input`). Result `{target, written, tasks, element_links}`. |
 | `model_history {path}` | none | Stays on the platform (bucket versions). |
-| `ifc_diff {pathA, pathB \| path, versionA, versionB, tolerance_mm, filename}` | `compare {handle, model, tolerance_m, kind, class, storey, discipline, max_changes, offset}` | The model attached to the project (earlier) against another revision in a file (later): every change per element (kind, what changed, before and after, confidence), the summary, by discipline / storey / class, quantity deltas per class, paged; the whole list in the result files (`compare.json`, `compare-changes.csv`). `relink_model {dry_run: true}` still answers what happens to the links. No HTML report: the agent writes the report the user wants. Two versions of one bucket file: the platform hands each version as a file. |
+| `ifc_diff {pathA, pathB \| path, versionA, versionB, tolerance_mm, filename}` | `compare {handle, model, tolerance_m, kind, class, storey, discipline}` | The model attached to the project (earlier) against another revision in a file (later): every change per element (kind, what changed, before and after, confidence), the summary, by discipline / storey / class, quantity deltas per class, the first 25 changes with `changes_total`; the whole list in the result files (`compare.json`, `compare-changes.csv`). `relink_model {dry_run: true}` still answers what happens to the links. No HTML report: the agent writes the report the user wants. Two versions of one bucket file: the platform hands each version as a file. |
 | none | `element_info`, `set_4d_keys`, `import_4d`, `compare_4d`, `set_element_status`, `relink_model` | New. |
 
 ## What the platform has that the clone lacks

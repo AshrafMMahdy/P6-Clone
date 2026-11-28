@@ -15,9 +15,9 @@ export function ReportsView() {
   const ui = useStore((s) => s.ui);
   const db = useStore((s) => s.db);
   const v = useStore((s) => s.dbVersion);
-  // AGREED LIMIT (owner, 2026-11-28): 1 to 26 weeks, 3 when the report opens — the Lookahead report's weeks; another value is refused in words, not turned into 3 — why: item 26 rule 4, "Defaults - agreed" — arbitrary by agreement.
+  // AGREED LIMIT (owner, 2026-11-28): 3 weeks when the report opens — the Lookahead report's weeks; a value that is not a whole number of 1 or more is refused in words, not turned into 3 (the agent's run_report takes the same) — why: item 26 rule 4, "Defaults - agreed" — arbitrary by agreement.
   const [weeks, setWeeks] = useState(3), [weeksText, setWeeksText] = useState('3');
-  const weeksOk = (t: string) => { const n = Number(t); return t.trim() !== '' && Number.isInteger(n) && n >= 1 && n <= 26 ? n : null; };
+  const weeksOk = (t: string) => { const n = Number(t); return t.trim() !== '' && Number.isInteger(n) && n >= 1 ? n : null; };
   const [showAll, setShowAll] = useState(false); // big reports draw the first PAGE rows until asked
   useEffect(() => setShowAll(false), [ui.detailTab]);
   const entries = useMemo(() => listReports(db), [db, v]);
@@ -50,7 +50,7 @@ export function ReportsView() {
           <button className="btn" disabled={!custom} onClick={() => openDialog('reportWizard', { editId: id })}>Modify...</button>
           <button className="btn" disabled={!entry?.spec} title="A copy you can change (standard reports themselves are read-only)" onClick={() => openDialog('reportWizard', { copyFrom: id })}>Copy</button>
           <button className="btn" disabled={!custom} onClick={async () => { if (await window.p6.confirm(`Delete the report "${entry!.name}"?`)) { deleteReport(id); toast('Report deleted (Ctrl+Z to undo)'); } }}>Delete</button>
-          {id === 'lookahead' && <>Weeks: <input className="opt" type="number" min={1} max={26} value={weeksText} onChange={(e) => { setWeeksText(e.target.value); const n = weeksOk(e.target.value); if (n != null) setWeeks(n); }} style={{ width: 50 }} />{weeksOk(weeksText) == null && <span style={{ color: '#b00020' }}> a whole number from 1 to 26 (the report shows {weeks})</span>}</>}
+          {id === 'lookahead' && <>Weeks: <input className="opt" type="number" min={1} value={weeksText} onChange={(e) => { setWeeksText(e.target.value); const n = weeksOk(e.target.value); if (n != null) setWeeks(n); }} style={{ width: 50 }} />{weeksOk(weeksText) == null && <span style={{ color: '#b00020' }}> a whole number of 1 or more (the report shows {weeks})</span>}</>}
         </div>
         <div style={{ flex: 1, overflow: 'auto', padding: 16, background: '#fff' }} className="report-page">
           {text != null ? <pre className="log">{text}</pre> : !ui.openProjects.length ? <div className="empty">Open a project to run reports.</div> : result && <>
